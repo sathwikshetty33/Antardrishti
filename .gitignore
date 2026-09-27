@@ -1,1 +1,8 @@
 CLAUDE.md
+dataset/raw/
+dataset/external/
+dataset/export/
+__pycache__/
+*.pyc
+.venv/
+dataset/env.json

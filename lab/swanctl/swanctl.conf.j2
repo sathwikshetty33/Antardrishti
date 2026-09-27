@@ -1,0 +1,67 @@
+# rendered by capture/run.py - do not edit
+connections {
+{% for c in conns %}
+  {{ c.name }} {
+    version = {{ c.ike_version }}
+    local_addrs = {{ c.local_addr }}
+    remote_addrs = {{ c.remote_addr }}
+    proposals = {{ c.ike_proposal }}
+    rekey_time = {{ c.ike_rekey_s }}s
+    reauth_time = 0
+    over_time = {{ c.ike_rekey_s // 10 + 10 }}s
+    rand_time = 0
+    dpd_delay = {{ c.dpd_delay_s }}s
+    encap = {{ 'yes' if c.encap else 'no' }}
+    aggressive = {{ 'yes' if c.aggressive else 'no' }}
+    fragmentation = {{ c.fragmentation }}
+    mobike = no
+{% if c.keyingtries is defined %}
+    keyingtries = {{ c.keyingtries }}
+{% endif %}
+    local {
+{% if c.auth == 'psk' %}
+      auth = psk
+{% else %}
+      auth = pubkey
+      certs = {{ c.local_cert }}
+{% endif %}
+      id = {{ c.local_id }}
+    }
+    remote {
+      auth = {{ 'psk' if c.auth == 'psk' else 'pubkey' }}
+      id = {{ c.remote_id }}
+    }
+    children {
+{% for ch in c.children %}
+      {{ ch.name }} {
+        mode = {{ ch.mode }}
+        local_ts = {{ ch.local_ts }}
+        remote_ts = {{ ch.remote_ts }}
+{% if ch.ah_proposals %}
+        ah_proposals = {{ ch.ah_proposals }}
+{% else %}
+        esp_proposals = {{ ch.esp_proposal }}
+{% endif %}
+        rekey_time = {{ ch.child_rekey_s }}s
+        life_time = {{ ch.child_rekey_s + ch.child_rekey_s // 10 + 10 }}s
+        rand_time = 0
+        replay_window = {{ ch.replay_window }}
+        dpd_action = none
+        start_action = {{ ch.start_action }}
+        close_action = none
+      }
+{% endfor %}
+    }
+  }
+{% endfor %}
+}
+
+secrets {
+{% for s in secrets %}
+  ike-{{ loop.index }} {
+    id-1 = {{ s.id1 }}
+    id-2 = {{ s.id2 }}
+    secret = "{{ s.psk }}"
+  }
+{% endfor %}
+}

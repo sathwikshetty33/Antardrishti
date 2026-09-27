@@ -1,0 +1,41 @@
+# rendered by capture/run.py - do not edit
+include strongswan.d/*.conf
+
+charon {
+  load_modular = yes
+  install_virtual_ip = no
+  retransmit_tries = {{ retransmit_tries | default(5) }}
+  retransmit_timeout = {{ retransmit_timeout | default(4.0) }}
+  retransmit_base = {{ retransmit_base | default(1.8) }}
+{% if cookie_threshold is defined %}
+  cookie_threshold = {{ cookie_threshold }}
+{% endif %}
+  filelog {
+    charon {
+      path = /var/log/charon.log
+      time_format = %Y-%m-%dT%H:%M:%S
+      time_add_ms = yes
+      ike_name = yes
+      append = no
+      flush_line = yes
+      default = 1
+      ike = 2
+      cfg = 2
+      knl = 2
+      net = 1
+      enc = 1
+    }
+    stderr {
+      default = 0
+    }
+  }
+  plugins {
+    include strongswan.d/charon/*.conf
+    kernel-libipsec {
+      load = {{ 'yes' if backend == 'libipsec' else 'no' }}
+    }
+    kernel-netlink {
+      load = {{ 'no' if backend == 'libipsec' else 'yes' }}
+    }
+  }
+}
