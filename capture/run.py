@@ -660,7 +660,7 @@ def app_ok(app, evs):
     if app == "video":
         return any(e.get("frags", 0) > 0 for e in ev if e["event"] == "play")
     if app == "email":
-        return any(e["event"] in ("send", "fetch") and e.get("rc", 0) == 0 for e in ev)
+        return any(e["event"] in ("send", "fetch") and e.get("rc", 0) in (0, "cut at deadline") for e in ev)
     if app == "bulk":
         return any(e.get("rc") in (0, "cut at deadline") for e in ev)
     if app == "chat":

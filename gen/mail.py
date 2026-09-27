@@ -5,6 +5,7 @@ attachments are random 0-5 MB. think times between actions are random.
 import imaplib
 import os
 import random
+import signal
 import ssl
 import subprocess
 import time
@@ -32,7 +33,10 @@ def send(a, rng):
     six = "-6" if a.fam == "v6" else "-4"
     cmd = (f"swaks {six} --server {a.ip} --port 587 --tls --to lab@lab.test "
            f"--from user{rng.randint(1, 50)}@lab.test --h-Subject '{subj}' --body '{body}' {att}")
-    p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=max(5, left(a)))
+    try:
+        p = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=max(1, left(a)))
+    except subprocess.TimeoutExpired:
+        return {"action": "send", "attach_bytes": size, "rc": "cut at deadline"}
     return {"action": "send", "attach_bytes": size, "rc": p.returncode}
 
 
@@ -59,15 +63,32 @@ def fetch(a, rng):
     return {"action": "fetch", "messages": min(k, len(ids)), "bytes": got}
 
 
+class Deadline(Exception):
+    pass
+
+
+def on_alarm(sig, frame):
+    raise Deadline()
+
+
 def main():
+    signal.signal(signal.SIGALRM, on_alarm)
     a = args()
     rng = random.Random(a.seed)
     first = True
     while left(a) > 3:
         t = time.time()
+        act = "send" if first or rng.random() < 0.6 else "fetch"
         try:
-            d = send(a, rng) if first or rng.random() < 0.6 else fetch(a, rng)
+            # hard deadline per action: imap timeouts apply per read, so a slow fetch
+            # of large messages on a congested link would otherwise run past the run
+            signal.setitimer(signal.ITIMER_REAL, max(1.0, left(a)))
+            d = send(a, rng) if act == "send" else fetch(a, rng)
+            signal.setitimer(signal.ITIMER_REAL, 0)
+        except Deadline:
+            d = {"action": act, "rc": "cut at deadline"}
         except Exception as e:
+            signal.setitimer(signal.ITIMER_REAL, 0)
             d = {"action": "error", "error": str(e)[:200]}
         first = False
         emit("email", d.pop("action"), t, **d)
