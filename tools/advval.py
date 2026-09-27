@@ -99,7 +99,7 @@ def latest_ok(tier):
     return {k: v for k, v in last.items() if v["status"] == "ok" and v["stage"] == "av"}
 
 
-def cv_auc(X, y, g, seed=0):
+def cv_auc(X, y, g, seed=0, gains=None):
     import numpy as np
     from lightgbm import LGBMClassifier
     from sklearn.metrics import roc_auc_score
@@ -107,10 +107,18 @@ def cv_auc(X, y, g, seed=0):
     p = np.zeros(len(y))
     for tr, te in GroupKFold(n_splits=5).split(X, y, g):
         m = LGBMClassifier(n_estimators=300, learning_rate=0.05, num_leaves=15, min_child_samples=20,
-                           subsample=0.8, subsample_freq=1, colsample_bytree=0.8, random_state=seed, verbose=-1)
+                           subsample=0.8, subsample_freq=1, colsample_bytree=0.8, random_state=seed,
+                           importance_type="gain", verbose=-1)
         m.fit(X[tr], y[tr])
         p[te] = m.predict_proba(X[te])[:, 1]
+        if gains is not None:
+            gains.append(m.feature_importances_)
     return roc_auc_score(y, p), p
+
+
+def per_app_auc(y, prob, app):
+    from sklearn.metrics import roc_auc_score
+    return {a: roc_auc_score(y[app == a], prob[app == a]) for a in sorted(set(app)) if len(set(y[app == a])) == 2}
 
 
 def analyze(n_perm):
@@ -135,22 +143,35 @@ def analyze(n_perm):
     keys = sorted(rows[0])
     X = np.array([[r[k] for k in keys] for r in rows])
     y, g, app = np.array(y), np.array(g), np.array(app)
-    auc, prob = cv_auc(X, y, g)
-    per_app = {a: round(roc_auc_score(y[app == a], prob[app == a]), 3)
-               for a in sorted(set(app)) if len(set(y[app == a])) == 2}
-    # paired permutation: swap the serial/parallel labels within random twin pairs
-    rng, null = random.Random(0), []
+    gains = []
+    auc, prob = cv_auc(X, y, g, gains=gains)
+    per_app = per_app_auc(y, prob, app)
+    imp = np.mean(gains, axis=0)
+    top = [(keys[i], round(float(imp[i] / imp.sum()), 3)) for i in np.argsort(imp)[::-1][:6]]
+    # paired permutation: swap the serial/parallel labels within random twin pairs;
+    # the same permutations give a null for the overall auc and for every class
+    rng, null, null_app = random.Random(0), [], defaultdict(list)
     for i in range(n_perm):
         flip = {t: rng.random() < 0.5 for t in pairs}
         yp = np.array([1 - v if flip[t] else v for v, t in zip(y, g)])
-        null.append(cv_auc(X, yp, g, seed=i + 1)[0])
+        a_, p_ = cv_auc(X, yp, g, seed=i + 1)
+        null.append(a_)
+        for k, v in per_app_auc(yp, p_, app).items():
+            null_app[k].append(v)
     pval = (1 + sum(a >= auc for a in null)) / (1 + len(null))
-    res = {"pairs": len(pairs), "windows": int(len(y)), "auc": round(auc, 3), "auc_per_app": per_app,
+    classes = {}
+    for k, v in per_app.items():
+        pk = (1 + sum(x >= v for x in null_app[k])) / (1 + len(null_app[k]))
+        classes[k] = {"auc": round(v, 3), "p": round(pk, 3),
+                      "null_p95": round(float(np.percentile(null_app[k], 95)), 3),
+                      "windows": int((app == k).sum()), "pass": bool(v < auc_max and pk >= p_min)}
+    res = {"pairs": len(pairs), "windows": int(len(y)), "auc": round(auc, 3), "classes": classes,
+           "top_features": top,
            "permutation": {"n": n_perm, "p": round(pval, 3), "null_mean": round(float(np.mean(null)), 3),
                            "null_p95": round(float(np.percentile(null, 95)), 3)},
            "avp_target_concurrency_mean": round(float(np.mean(conc)), 2) if conc else None,
            "rule": f"pass if auc < {auc_max} and permutation p >= {p_min}",
-           "pass": bool(auc < auc_max and pval >= p_min)}
+           "pass": bool(auc < auc_max and pval >= p_min and all(c["pass"] for c in classes.values()))}
     out_json.write_text(json.dumps(res, indent=1) + "\n")
     readme(res)
     print(json.dumps(res, indent=1))
@@ -172,11 +193,17 @@ def readme(res):
         "A LightGBM classifier on outer ESP window features (2 s windows, per-direction size and "
         "inter-arrival statistics) was cross-validated with both twins of a pair in the same fold.", "",
         f"- pairs: {res['pairs']}, windows: {res['windows']}",
-        f"- out-of-fold AUC: **{res['auc']}** (per app: {res['auc_per_app']})",
+        f"- out-of-fold AUC: **{res['auc']}**",
+        "", "| class | windows | AUC | permutation p | null 95th pct | verdict |", "|---|---|---|---|---|---|",
+        *[f"| {k} | {c['windows']} | {c['auc']} | {c['p']} | {c['null_p95']} | {'pass' if c['pass'] else '**fail**'} |"
+          for k, c in res["classes"].items()], "",
+        f"- most informative features (share of gain): {', '.join(f'{n} {v}' for n, v in res['top_features'])}",
         f"- paired permutation test ({res['permutation']['n']} permutations): p = {res['permutation']['p']}, "
         f"null mean {res['permutation']['null_mean']}, null 95th percentile {res['permutation']['null_p95']}",
         f"- mean concurrency during the parallel target runs: {res['avp_target_concurrency_mean']}",
-        f"- pre-registered rule: {res['rule']} -> {verdict}", b])
+        f"- pre-registered rule: {res['rule']} (overall and per class) -> {verdict}",
+        "- caveat: the serial half ran before the parallel half (not interleaved), so slow drift of the"
+        " host's own load over those hours is confounded with the condition", b])
     s = re.sub(re.escape(a) + ".*?" + re.escape(b), body, s, flags=re.S) if a in s else s.rstrip() + "\n\n" + body + "\n"
     p.write_text(s)
 

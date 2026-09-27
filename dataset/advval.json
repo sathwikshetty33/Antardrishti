@@ -1,0 +1,63 @@
+{
+ "pairs": 27,
+ "windows": 1674,
+ "auc": 0.724,
+ "classes": {
+  "video": {
+   "auc": 0.787,
+   "p": 0.05,
+   "null_p95": 0.774,
+   "windows": 707,
+   "pass": false
+  },
+  "voip": {
+   "auc": 0.678,
+   "p": 0.045,
+   "null_p95": 0.649,
+   "windows": 732,
+   "pass": false
+  },
+  "web": {
+   "auc": 0.696,
+   "p": 0.005,
+   "null_p95": 0.601,
+   "windows": 235,
+   "pass": false
+  }
+ },
+ "top_features": [
+  [
+   "up_iat_p50",
+   0.096
+  ],
+  [
+   "down_iat_p10",
+   0.087
+  ],
+  [
+   "up_iat_p90",
+   0.086
+  ],
+  [
+   "down_iat_min",
+   0.081
+  ],
+  [
+   "up_iat_max",
+   0.059
+  ],
+  [
+   "up_iat_p10",
+   0.05
+  ]
+ ],
+ "permutation": {
+  "n": 200,
+  "p": 0.005,
+  "null_mean": 0.499,
+  "null_p95": 0.641
+ },
+ "avp_target_concurrency_mean": 2.95,
+ "rule": "pass if auc < 0.6 and permutation p >= 0.05",
+ "pass": false
+}

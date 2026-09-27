@@ -63,13 +63,15 @@ Probed by `lab/preflight.py` on 2026-09-27.
 | storage | draft release `p0-data` on this repository: two slice archives + `.sha256` (download: `gh release download p0-data`) |
 | coverage | every P0 target in `coverage.md` is met |
 
-**Parallel labs are not yet validated.** Every P0 run was captured with 3 labs on its
-machine (mean concurrency 2.93, mean machine CPU 19.7%, highest per-run mean 50%). The
-pre-registered adversarial validation (section "Parallel labs" in CLAUDE.md) was paused
-at 27/27 serial and 3/91 parallel runs: the owner chose to start P0 without waiting
-for it. Until it is completed, treat any effect of parallel labs on timing features as
-unmeasured. Every run records `lab_id`, `labs`, concurrency and load, so it can be
-controlled for.
+**Parallel labs failed the adversarial validation (see below).** Every P0 run was
+captured with 3 labs on its machine (mean concurrency 2.93, mean machine CPU 19.7%).
+The check, completed after P0, found serial and 3-lab windows distinguishable
+(AUC 0.72, p = 0.005), almost entirely through packet inter-arrival times. For P0 this
+means: **packet sizes, ESP shapes, IKE content and counts are unaffected; timing
+features (inter-arrival statistics, burst timing) of P0 traffic runs are biased by
+concurrency and should not be used to train or evaluate timing-based models** until the
+traffic runs are recaptured serially (`--labs 1`, about 6 h / 24 core-hours). Every
+run records `lab_id`, `labs`, concurrency and load. P1 and later use `--labs 1`.
 
 **Code versions.** The experiment design (`plan.design_sha`) did not change during P0.
 The orchestration and one generator were fixed while P0 ran (commits e03bb4b to
@@ -84,3 +86,24 @@ uses a fixed mirror of 38 pages; video uses 2 films at 5 bitrates; the 160 mid_s
 traffic runs have their tunnel's IKE setup in another run of the same tunnel (tunnel
 reuse), linked by `group`.
 <!-- p0:end -->
+
+<!-- advval:start -->
+## Parallel labs: adversarial validation
+
+Can a model tell traffic captured with one lab on the machine from traffic captured with three labs side by side? The same 27 target runs (voip, web, video on 3 set-A configs x 3 reps) were captured serially (tier `avs`) and at full parallelism (tier `avp`, next to light filler runs), with identical config, netem and app seed per pair. A LightGBM classifier on outer ESP window features (2 s windows, per-direction size and inter-arrival statistics) was cross-validated with both twins of a pair in the same fold.
+
+- pairs: 27, windows: 1674
+- out-of-fold AUC: **0.724**
+
+| class | windows | AUC | permutation p | null 95th pct | verdict |
+|---|---|---|---|---|---|
+| video | 707 | 0.787 | 0.05 | 0.774 | **fail** |
+| voip | 732 | 0.678 | 0.045 | 0.649 | **fail** |
+| web | 235 | 0.696 | 0.005 | 0.601 | **fail** |
+
+- most informative features (share of gain): up_iat_p50 0.096, down_iat_p10 0.087, up_iat_p90 0.086, down_iat_min 0.081, up_iat_max 0.059, up_iat_p10 0.05
+- paired permutation test (200 permutations): p = 0.005, null mean 0.499, null 95th percentile 0.641
+- mean concurrency during the parallel target runs: 2.95
+- pre-registered rule: pass if auc < 0.6 and permutation p >= 0.05 (overall and per class) -> **failed**: concurrency must be lowered and retested
+- caveat: the serial half ran before the parallel half (not interleaved), so slow drift of the host's own load over those hours is confounded with the condition
+<!-- advval:end -->
