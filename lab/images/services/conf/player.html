@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>lab player</title>
+<video id="v" muted autoplay playsinline style="width:1280px;height:720px"></video>
+<script src="/hls/hls.min.js"></script>
+<script>
+// hls.js with default abr; ?v=<name>&t=<start seconds>
+const q = new URLSearchParams(location.search);
+const v = document.getElementById("v");
+window.stats = {levels: [], switches: [], errors: [], frags: 0, bytes: 0};
+const hls = new Hls({startPosition: +(q.get("t") || 0), capLevelToPlayerSize: false});
+hls.on(Hls.Events.MANIFEST_PARSED, (e, d) => {
+  window.stats.levels = d.levels.map(l => l.height + "p@" + l.bitrate);
+  v.play();
+});
+hls.on(Hls.Events.LEVEL_SWITCHED, (e, d) => window.stats.switches.push([performance.now() / 1000, d.level]));
+hls.on(Hls.Events.FRAG_LOADED, (e, d) => { window.stats.frags++; window.stats.bytes += d.frag.stats.total; });
+hls.on(Hls.Events.ERROR, (e, d) => window.stats.errors.push(d.details));
+hls.loadSource("/hls/" + (q.get("v") || "bbb") + "/master.m3u8");
+hls.attachMedia(v);
+</script>

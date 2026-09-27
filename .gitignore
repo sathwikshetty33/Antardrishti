@@ -7,3 +7,4 @@ __pycache__/
 .venv/
 dataset/env.json
 lab/pki/
+lab/media/

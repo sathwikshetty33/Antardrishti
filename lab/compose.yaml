@@ -69,7 +69,7 @@ services:
     build: images/services
     container_name: antar_host_b
     hostname: host-b
-    volumes: ["../gen:/gen:ro", "../dataset/external:/external:ro"]
+    volumes: ["../gen:/gen:ro", "../dataset/external:/external:ro", "./media:/srv/media:ro"]
     networks:
       lan_b: {ipv4_address: 10.2.0.10, ipv6_address: "fd00:2::10"}
 
@@ -87,7 +87,7 @@ services:
     <<: *lab
     image: antar/services
     container_name: antar_svc_gw
-    volumes: ["../gen:/gen:ro", "../dataset/external:/external:ro"]
+    volumes: ["../gen:/gen:ro", "../dataset/external:/external:ro", "./media:/srv/media:ro"]
     network_mode: "service:gw_b"
     sysctls: {}
     depends_on: [gw_b]

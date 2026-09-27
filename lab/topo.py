@@ -111,7 +111,32 @@ def up(build=False):
         for k in ("rsa", "ecdsa"):
             put(c[g], f"/etc/swanctl/x509/{g}-{k}.pem", (pki / f"{g}-{k}.pem").read_text())
             put(c[g], f"/etc/swanctl/private/{g}-{k}.key", (pki / f"{g}-{k}.key").read_text())
+    ssh_keys()
+    for n in ("host_b", "svc_gw"):
+        for _ in range(120):
+            if dx(c[n], "test -f /tmp/ready", check=False)[0] == 0:
+                break
+            rc, why = dx(c[n], "cat /tmp/failed", check=False)
+            if rc == 0:
+                raise RuntimeError(f"services on {n}: {why}")
+            time.sleep(1)
+        else:
+            raise RuntimeError(f"services on {n} not ready")
     return "lab up"
+
+
+def ssh_keys():
+    """throwaway key for scp/rsync bulk transfers: clients -> user lab on servers"""
+    k = pki / "ssh_lab"
+    if not k.exists():
+        sh(f"ssh-keygen -q -t ed25519 -N '' -C antardrishti-lab -f {k}")
+    for n in ("host_a", "cli_gw"):
+        dx(c[n], "mkdir -p /root/.ssh && chmod 700 /root/.ssh")
+        put(c[n], "/root/.ssh/id_lab", k.read_text())
+        dx(c[n], "chmod 600 /root/.ssh/id_lab")
+    for n in ("host_b", "svc_gw"):
+        put(c[n], "/home/lab/.ssh/authorized_keys", (pki / "ssh_lab.pub").read_text())
+        dx(c[n], "chown -R lab /home/lab/.ssh && chmod 600 /home/lab/.ssh/authorized_keys")
 
 
 def down():
@@ -215,6 +240,34 @@ def initiate(timeout=20, check=True):
 def stop_ipsec():
     for s in "ab":
         dx(c[f"gw_{s}"], "pkill -x charon; sleep 0.3; ip xfrm state flush; ip xfrm policy flush; true", check=False)
+
+
+def nflog(on, group=7, size=96):
+    """transport-mode inner capture on gw_a: plaintext of ipsec-protected packets
+    in both directions. tcpdump must read nflog:<group> with -s 0; truncation is
+    done by --nflog-size so the nflog tlvs stay intact, and threshold 1 delivers
+    each packet at once (the kernel default batches up to 1 s, ruining timing)."""
+    g = c["gw_a"]
+    for ipt in ("iptables", "ip6tables"):
+        _, old = dx(g, f"{ipt} -S | grep -- '--nflog-group {group}' || true")
+        for r in old.splitlines():
+            dx(g, f"{ipt} {r.replace('-A ', '-D ', 1)}")
+        for ch, d in (("OUTPUT", "out"), ("INPUT", "in")):
+            if on:
+                dx(g, f"{ipt} -A {ch} -m policy --pol ipsec --dir {d} -j NFLOG --nflog-group {group} "
+                      f"--nflog-size {size} --nflog-threshold 1")
+
+
+def gen_ctx(cfg, run_dir=None):
+    """what a generator needs to know about where it runs"""
+    cli, srv, ip = endpoints(cfg)
+    f = cfg["inner_family"]
+    return {"cli": cli, "srv": srv, "ip": ip, "fam": f, "mode": cfg["mode"],
+            "a_ip": host["a"][f] if cfg["mode"] == "tunnel" else gw["a"][f],
+            "gw_a": c["gw_a"], "gw_b": c["gw_b"],
+            "gw_a_lan": iface(c["gw_a"], gw_lan["a"]["v4"]),
+            "gw_b_lan": iface(c["gw_b"], gw_lan["b"]["v4"]),
+            "run_dir": str(run_dir) if run_dir else None}
 
 
 def endpoints(cfg):
