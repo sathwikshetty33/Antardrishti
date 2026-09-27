@@ -303,12 +303,12 @@ def ensure_keys():
 def ensure_pki():
     """throwaway lab ca + rsa and ecdsa certs per gateway, and e22's big chain: an rsa
     4096 cert under an rsa 4096 intermediate, so ike_auth cannot fit one packet;
-    never reuse elsewhere"""
+    never reuse elsewhere. made in a throwaway container of the gw image, written
+    straight into lab/pki: a batch makes them before any lab is up"""
     if (pki / "ca.pem").exists():
         return
     pki.mkdir(exist_ok=True)
-    g = c["gw_a"]
-    cmds = ["cd /tmp && rm -rf pki && mkdir pki && cd pki",
+    cmds = ["cd /pki",
             "pki --gen --type rsa --size 3072 --outform pem > ca.key",
             "pki --self --ca --lifetime 3650 --in ca.key --dn 'CN=antardrishti lab ca' --outform pem > ca.pem",
             "pki --gen --type rsa --size 4096 --outform pem > int.key",
@@ -320,11 +320,8 @@ def ensure_pki():
             cmds += [f"pki --gen {opt} --outform pem > {gname}-{k}.key",
                      f"pki --pub --in {gname}-{k}.key | pki --issue --lifetime 3650 --cacert {ca}.pem "
                      f"--cakey {ca}.key --dn 'CN={fq}' --san {fq} --outform pem > {gname}-{k}.pem"]
-    dx(g, " && ".join(cmds), timeout=600)
-    for f in ["ca.pem", "ca.key", "int.pem", "int.key"] + [f"{a}-{k}.{e}" for a in ("gw_a", "gw_b")
-                                                          for k in cert_keys for e in ("pem", "key")]:
-        _, txt = dx(g, f"cat /tmp/pki/{f}")
-        (pki / f).write_text(txt + "\n")
+    esc = " && ".join(cmds).replace("'", "'\\''")
+    sh(f"docker run --rm --network none -v {pki}:/pki antar/gw sh -c '{esc}'", timeout=600)
 
 
 def conn_ctx(cfg, side, over=None):
