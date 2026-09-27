@@ -6,7 +6,7 @@
 Probed by `lab/preflight.py` on 2026-09-27.
 
 - host kernel: `6.8.0-1064-azure`
-- docker: `29.8.0-1`
+- docker: `29.8.1-1`
 - strongSwan: `strongSwan swanctl 5.9.13`
 - ipsec backend: **kernel**
 - netem available: **yes**
@@ -14,8 +14,8 @@ Probed by `lab/preflight.py` on 2026-09-27.
 
 | check | result | detail |
 |---|---|---|
-| docker | ok | 29.8.0-1 overlayfs |
-| build images | ok |  |
+| docker | ok | 29.8.1-1 overlayfs |
+| pinned images | ok | 6 digests of lab/images.lock: gw, router, host, services, noise, media |
 | bridge netfilter off | ok | bridge-nf-call-ip(6)tables=0 |
 | privileged sibling containers | ok | privileged siblings up, v4+v6 routed through router |
 | kernel xfrm | ok | ip xfrm state add/flush works in gateway |
@@ -24,8 +24,8 @@ Probed by `lab/preflight.py` on 2026-09-27.
 | netem | ok | delay/jitter/loss/rate |
 | nflog policy match | ok | NFLOG + policy match, tcpdump -i nflog:5 |
 | nft raw payload match | ok | raw payload match for ike exchange type |
-| strongswan tunnel v4 (kernel) | ok | backend=kernel: 8 ike + 20 esp packets seen at router |
-| strongswan tunnel v6 (kernel) | ok | backend=kernel: 8 ike + 20 esp packets seen at router |
+| strongswan tunnel v4 (kernel) | ok | backend=kernel: 8 ike + 12 esp packets seen at router |
+| strongswan tunnel v6 (kernel) | ok | backend=kernel: 8 ike + 16 esp packets seen at router |
 | swanctl --list-algs | ok | encryption:15, integrity:15, aead:10, hasher:12, prf:10, xof:8, kdf:2, drbg:7, dh:27, rng:3, nonce-gen:1 |
 | kernel xfrm algorithms | ok | unsupported: none |
 <!-- env:end -->
@@ -44,6 +44,16 @@ Probed by `lab/preflight.py` on 2026-09-27.
 - **Tunnels are reused** within a set-A config: the first run of a tunnel captures its
   IKE setup (`before_tunnel`), later runs start on the established tunnel
   (`mid_stream`). Splits are per tunnel, so train and test never share a tunnel.
+- **Timing validity.** A run records `timing_valid: true` only when it belongs to a
+  timing-sensitive stage and was captured alone on its machine. Use only those runs for
+  inter-arrival and burst-timing features.
+- **Realism (internet) runs** leave the lab through the tunnel and `gw_b`'s NAT, and
+  resolve names with the capturing machine's own upstream resolver (in codespaces the
+  Azure resolver; public resolvers are blocked there). Web visits the live pages of the
+  mirror list; YouTube is attempted and, when it answers the datacenter address with a
+  bot check, the attempt is retried; the last attempt keeps the run and records the
+  block (`observed.blocked`, a coverage gap) instead of working around it. Only realism
+  runs reach the internet; all other runs keep the lab without DNS.
 <!-- notes:end -->
 
 <!-- p0:start -->
@@ -71,7 +81,9 @@ means: **packet sizes, ESP shapes, IKE content and counts are unaffected; timing
 features (inter-arrival statistics, burst timing) of P0 traffic runs are biased by
 concurrency and should not be used to train or evaluate timing-based models** until the
 traffic runs are recaptured serially (`--labs 1`, about 6 h / 24 core-hours). Every
-run records `lab_id`, `labs`, concurrency and load. P1 and later use `--labs 1`.
+run records `lab_id`, `labs`, concurrency and load. P1 and later use `--labs 1`. The
+manifest annotates the 192 P0 traffic runs `timing_valid: false` (append-only annotation
+lines; the attempts and the `p0-data` archives are unchanged).
 
 **Code versions.** The experiment design (`plan.design_sha`) did not change during P0.
 The orchestration and one generator were fixed while P0 ran (commits e03bb4b to
