@@ -949,12 +949,17 @@ def disk():
 
 
 def select(args):
+    """the plan, sliced first (a shard's share never depends on other filters),
+    then narrowed by --scenario / --rep / --ids"""
     runs = plan.build(args.tier)
+    si, sn = parse_slice(args.slice)
+    if sn > 1:
+        runs = plan.slice_units(runs, si, sn)
     if args.scenario:
         runs = [r for r in runs if r["scenario"] in args.scenario or r["stage"] in args.scenario]
     if args.rep:
         runs = [r for r in runs if r["rep"] in args.rep]
-    if args.ids:
+    if args.ids is not None:
         runs = [r for r in runs if r["run_id"] in args.ids]
     return runs
 
@@ -1067,7 +1072,7 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--rep", type=int, nargs="*", help="only these reps")
-    ap.add_argument("--ids", nargs="*", help="only these run ids")
+    ap.add_argument("--ids", nargs="+", help="only these run ids")
     ap.add_argument("--list", action="store_true", help="print run ids")
     ap.add_argument("--status", action="store_true", help="is this selection (slice) complete? exit 1 if not")
     ap.add_argument("--yes", action="store_true", help="confirm a batch estimated over 2 hours")
@@ -1082,8 +1087,6 @@ def main():
     last, tries = history()
     if args.fill_gaps:
         runs += gaps(runs, last)
-    if sn > 1:
-        runs = plan.slice_units(runs, si, sn)
     todo = [r for r in runs if (args.redo or last.get(r["run_id"]) != "ok") and not r.get("skip")
             and (args.fill_gaps or args.retry or args.redo or tries[r["run_id"]] < attempts)]
     if args.list:
@@ -1094,7 +1097,10 @@ def main():
         return status(runs, last, tries)
     if args.dry_run or args.list:
         # estimates for every shard of the chosen split
-        full = select(args) + (gaps(select(args), last) if args.fill_gaps else [])
+        full = plan.build(args.tier)
+        if args.scenario or args.rep or args.ids is not None:
+            full = [r for r in select(argparse.Namespace(**{**vars(args), "slice": None}))]
+        full += gaps(full, last) if args.fill_gaps else []
         ftodo = {r["run_id"] for r in full if last.get(r["run_id"]) != "ok" and not r.get("skip")}
         dry_run(full, ftodo, args.labs, sn)
         return
