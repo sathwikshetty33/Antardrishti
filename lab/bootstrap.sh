@@ -17,9 +17,12 @@ python3 -m pip install -q -r lab/requirements.txt
 mkdir -p dataset/raw dataset/external/whatsapp dataset/external/public
 
 bash lab/cleanup.sh || true
-# lab images: the pinned digests from lab/images.lock (same on every shard), else a local build
-bash lab/images.sh pull || bash lab/images.sh build
-# media: the pinned snapshot, else fetch + encode it here (slow, and a later crawl may differ)
-[ -d lab/media/hls ] || bash lab/images.sh pull-media || bash lab/media.sh all
+# lab images and media: the pinned digests from lab/images.lock (the same on every shard).
+# a refused pull is an error, never a local build or crawl: runs on them are rejected at merge
+fail=""
+bash lab/images.sh pull || fail="images"
+media=$(awk '$1 == "media" {print $2}' lab/images.lock)
+[ "$(cat lab/media/.digest 2>/dev/null)" = "$media" ] || bash lab/images.sh pull-media || fail="$fail media"
 [ -s lab/media/bulk/f200.bin ] || bash lab/media.sh bulk
+[ -z "$fail" ] || { echo "bootstrap: pinned $fail not pulled (package access: README, Lab images)"; exit 1; }
 echo "bootstrap done: $(tshark --version | head -1)"

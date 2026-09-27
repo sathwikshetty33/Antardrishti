@@ -3,11 +3,13 @@
 #
 #   bash lab/images.sh push    build, push to ghcr, write lab/images.lock (commit it)
 #   bash lab/images.sh pull    pull every image by the digest in lab/images.lock and
-#                              tag it antar/<name>; falls back to a local build
+#                              tag it antar/<name>; a refused pull is an error, never a
+#                              local build (runs on local images are rejected at merge)
 #   bash lab/images.sh build   local build only
 #   bash lab/images.sh push-media | pull-media
 #                              the media snapshot (hls ladders + mirrored pages) as an
-#                              image, so every shard serves byte-identical content
+#                              image, so every shard serves byte-identical content;
+#                              pull-media records its digest in media/.digest
 #
 # pushing needs a classic personal access token with write:packages in GHCR_TOKEN
 # (fine-grained tokens do not work with ghcr.io); pulling falls back to GITHUB_TOKEN.
@@ -72,8 +74,8 @@ case "${1:-pull}" in
         docker tag "$d" "antar/$i"
         echo "pulled $d"
       else
-        echo "pull failed for $d: building antar/$i locally (runs will record no registry digest)"
-        docker build -q -t "antar/$i" "images/$i" >/dev/null
+        echo "pull refused for $d: no local build (runs on local images are rejected at merge); check package access"
+        exit 1
       fi
     done ;;
   push-media)
@@ -102,6 +104,7 @@ EOD
     mkdir -p media && rm -rf media/hls media/sites
     docker cp "$cid:/media/hls" media/hls && docker cp "$cid:/media/sites" media/sites
     docker rm "$cid" >/dev/null
+    echo "$d" > media/.digest
     echo "media from $d" ;;
   *)
     echo "usage: $0 push|pull|build|push-media|pull-media"; exit 2 ;;

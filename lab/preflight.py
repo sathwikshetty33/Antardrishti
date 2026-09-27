@@ -39,6 +39,30 @@ def build():
         sh(f"docker build -q -t antar/{img} {root}/lab/images/{img}", timeout=900)
 
 
+def pinned():
+    """the lab images and media are the digests in lab/images.lock (lab/images.sh
+    pull, pull-media): never a local build, runs on those are rejected at merge"""
+    lock = root / "lab" / "images.lock"
+    if not lock.exists():
+        build()
+        return "no lab/images.lock: gw and router built locally"
+    bad, n = [], 0
+    for line in lock.read_text().splitlines():
+        name, ref = line.split()
+        n += 1
+        if name == "media":
+            f = root / "lab" / "media" / ".digest"
+            if not f.exists() or f.read_text().strip() != ref:
+                bad.append("media")
+            continue
+        _, have = sh(f"docker image inspect -f '{{{{join .RepoDigests \" \"}}}}' antar/{name}", check=False)
+        if ref not in have.split():
+            bad.append(name)
+    if bad:
+        raise RuntimeError(f"not the pinned digests: {', '.join(bad)} (run lab/images.sh pull / pull-media)")
+    return f"{n} digests of lab/images.lock: gw, router, host, services, noise, media"
+
+
 def topo():
     for n, (v4, v6) in nets.items():
         sh(f"docker network create --internal --ipv6 --subnet {v4}.0/24 "
@@ -219,7 +243,7 @@ def write_readme(section):
 def main():
     cleanup()
     check("docker", lambda: sh("docker info --format '{{.ServerVersion}} {{.Driver}}'")[1])
-    check("build images", build)
+    check("pinned images", pinned)
     check("bridge netfilter off", bridge_off)
     if not check("privileged sibling containers", topo):
         cleanup()

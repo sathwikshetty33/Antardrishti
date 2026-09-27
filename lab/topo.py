@@ -38,6 +38,8 @@ host = {"a": {"v4": "10.1.0.10", "v6": "fd00:1::10"},
 anyn = {"v4": "0.0.0.0/0", "v6": "::/0"}
 psk = "antardrishti-lab-throwaway-psk"
 pki = root / "lab" / "pki"
+# gateway cert kinds: bigchain is e22's (ca -> rsa 4096 intermediate -> rsa 4096 cert)
+cert_keys = ("rsa", "ecdsa", "bigchain")
 
 
 # lab links: segment -> [(container, interface, ipv4/prefix, ipv6/prefix or None)]
@@ -158,10 +160,24 @@ def wan_guard(g, wan_ip, v6=True):
 
 def nat(on):
     """gw_b masquerades tunnelled lan_a traffic to the internet (realism tier).
-    touches only its own rule: docker's embedded dns lives in the same nat table"""
+    touches only its own rule: docker's embedded dns lives in the same nat table.
+    a remote selector of 0.0.0.0/0 also covers gw_a's own lan_a, so while it is on
+    gw_a keeps lan_a out of the tunnel, as strongswan's bypass-lan would: lan_a
+    stays in main (the tunnel route in table 220 is looked up first and would send
+    the replies to lan_a back onto the wan), and a bypass policy lets gw_a's own
+    packets to lan_a (icmp frag-needed: path mtu discovery) reach it in clear"""
     _, dev = dx(c["gw_b"], "ip -o route show default | awk '{print $5}'")
     rule = f"POSTROUTING -s {lan['a']['v4']} -o {dev.split()[0]} -j MASQUERADE"
     dx(c["gw_b"], f"while iptables -t nat -D {rule} 2>/dev/null; do :; done")
+    for f, ip in (("v4", "ip"), ("v6", "ip -6")):
+        n = lan["a"][f]
+        dx(c["gw_a"], f"while {ip} rule del to {n} lookup main priority 100 2>/dev/null; do :; done; "
+                      f"ip xfrm policy delete src {n} dst {n} dir out 2>/dev/null; "
+                      f"ip xfrm policy delete src {n} dst {n} dir in 2>/dev/null; true")
+        if on:
+            dx(c["gw_a"], f"{ip} rule add to {n} lookup main priority 100 && "
+                          f"ip xfrm policy update src {n} dst {n} dir out priority 100 && "
+                          f"ip xfrm policy update src {n} dst {n} dir in priority 100")
     if on:
         dx(c["gw_b"], f"iptables -t nat -A {rule}")
 
@@ -189,6 +205,21 @@ def no_dns(names):
     (sip, smtp reverse lookups, ...) would hang until it times out"""
     for n in names:
         dx(c[n], "printf 'nameserver 127.0.0.1\\noptions timeout:1 attempts:1\\n' > /etc/resolv.conf", check=False)
+
+
+def inet_dns(on):
+    """realism tier: host_a resolves through the tunnel and gw_b's nat with this
+    machine's upstream resolvers (codespaces drop queries to public resolvers such
+    as 1.1.1.1; the azure resolver answers). every other run keeps the lab without
+    dns (no_dns). returns the resolvers in use"""
+    if not on:
+        no_dns(["host_a"])
+        return []
+    ns = [l.split()[1] for l in open("/etc/resolv.conf") if l.startswith("nameserver")
+          and not l.split()[1].startswith("127.")] or ["1.1.1.1", "8.8.8.8"]
+    txt = "".join(f"nameserver {n}\\n" for n in ns)
+    dx(c["host_a"], f"printf '{txt}options timeout:2 attempts:2\\n' > /etc/resolv.conf")
+    return ns
 
 
 def up(build=False):
@@ -240,12 +271,12 @@ def down():
 
 def pki_ok():
     """every gateway cert must chain to the ca on disk"""
-    if not (pki / "ca.pem").exists():
+    if not (pki / "ca.pem").exists() or not (pki / "int.pem").exists():
         return False
     for g in ("gw_a", "gw_b"):
-        for k in ("rsa", "ecdsa"):
+        for k in cert_keys:
             f = pki / f"{g}-{k}.pem"
-            if not f.exists() or sh(f"openssl verify -CAfile {pki}/ca.pem {f}", check=False)[0]:
+            if not f.exists() or sh(f"openssl verify -CAfile {pki}/ca.pem -untrusted {pki}/int.pem {f}", check=False)[0]:
                 return False
     return (pki / "ssh_lab").exists() and (pki / "ssh_lab.pub").exists()
 
@@ -270,22 +301,28 @@ def ensure_keys():
 
 
 def ensure_pki():
-    """throwaway lab ca + rsa and ecdsa certs per gateway; never reuse elsewhere"""
+    """throwaway lab ca + rsa and ecdsa certs per gateway, and e22's big chain: an rsa
+    4096 cert under an rsa 4096 intermediate, so ike_auth cannot fit one packet;
+    never reuse elsewhere"""
     if (pki / "ca.pem").exists():
         return
     pki.mkdir(exist_ok=True)
     g = c["gw_a"]
     cmds = ["cd /tmp && rm -rf pki && mkdir pki && cd pki",
             "pki --gen --type rsa --size 3072 --outform pem > ca.key",
-            "pki --self --ca --lifetime 3650 --in ca.key --dn 'CN=antardrishti lab ca' --outform pem > ca.pem"]
+            "pki --self --ca --lifetime 3650 --in ca.key --dn 'CN=antardrishti lab ca' --outform pem > ca.pem",
+            "pki --gen --type rsa --size 4096 --outform pem > int.key",
+            "pki --pub --in int.key | pki --issue --ca --lifetime 3650 --cacert ca.pem --cakey ca.key "
+            "--dn 'CN=antardrishti lab intermediate ca' --outform pem > int.pem"]
     for gname, fq in (("gw_a", "gw-a.lab"), ("gw_b", "gw-b.lab")):
-        for k, opt in (("rsa", "--type rsa --size 2048"), ("ecdsa", "--type ecdsa --size 256")):
+        for k, opt, ca in (("rsa", "--type rsa --size 2048", "ca"), ("ecdsa", "--type ecdsa --size 256", "ca"),
+                           ("bigchain", "--type rsa --size 4096", "int")):
             cmds += [f"pki --gen {opt} --outform pem > {gname}-{k}.key",
-                     f"pki --pub --in {gname}-{k}.key | pki --issue --lifetime 3650 --cacert ca.pem "
-                     f"--cakey ca.key --dn 'CN={fq}' --san {fq} --outform pem > {gname}-{k}.pem"]
-    dx(g, " && ".join(cmds), timeout=120)
-    for f in ["ca.pem", "ca.key"] + [f"{a}-{k}.{e}" for a in ("gw_a", "gw_b")
-                                      for k in ("rsa", "ecdsa") for e in ("pem", "key")]:
+                     f"pki --pub --in {gname}-{k}.key | pki --issue --lifetime 3650 --cacert {ca}.pem "
+                     f"--cakey {ca}.key --dn 'CN={fq}' --san {fq} --outform pem > {gname}-{k}.pem"]
+    dx(g, " && ".join(cmds), timeout=600)
+    for f in ["ca.pem", "ca.key", "int.pem", "int.key"] + [f"{a}-{k}.{e}" for a in ("gw_a", "gw_b")
+                                                          for k in cert_keys for e in ("pem", "key")]:
         _, txt = dx(g, f"cat /tmp/pki/{f}")
         (pki / f).write_text(txt + "\n")
 
@@ -349,12 +386,27 @@ def charon_start(name, sconf):
     raise RuntimeError(f"charon on {name} did not start")
 
 
+def big_chain(on):
+    """e22's credentials (the big chain) sit on the gateways only during e22 runs: a
+    loaded intermediate ca would add its hash to the certificate requests, and so
+    change the ike sizes, of every other run"""
+    for g in ("gw_a", "gw_b"):
+        files = {"/etc/swanctl/x509ca/int.pem": "int.pem", f"/etc/swanctl/x509/{g}-bigchain.pem": f"{g}-bigchain.pem",
+                 f"/etc/swanctl/private/{g}-bigchain.key": f"{g}-bigchain.key"}
+        if on:
+            for dst, src in files.items():
+                put(c[g], dst, (pki / src).read_text())
+        else:
+            dx(c[g], "rm -f " + " ".join(files), check=False)
+
+
 def deploy(cfg, over=None, backend="kernel"):
     """render + load swanctl on both gateways. over = {"a": {...}, "b": {...}}
     with per-side conn / children / psk / charon / extra_conns overrides.
     returns rendered confs {a, b}"""
     over = over or {}
     out = {}
+    big_chain(cfg.get("cert_key") == "bigchain")
     for s in "ab":
         g = c[f"gw_{s}"]
         o = over.get(s, {})
@@ -397,7 +449,7 @@ def gen_ctx(cfg, run_dir=None):
     """what a generator needs to know about where it runs"""
     cli, srv, ip = endpoints(cfg)
     f = cfg["inner_family"]
-    return {"cli": cli, "srv": srv, "ip": ip, "fam": f, "mode": cfg["mode"],
+    return {"cli": cli, "srv": srv, "ip": ip, "fam": f, "mode": cfg["mode"], "internet": bool(cfg.get("internet")),
             "a_ip": host["a"][f] if cfg["mode"] == "tunnel" else gw["a"][f],
             "gw_a": c["gw_a"], "gw_b": c["gw_b"],
             "gw_a_lan": iface(c["gw_a"], gw_lan["a"]["v4"]),
@@ -499,4 +551,7 @@ def versions():
         _, d = sh(f"docker image inspect -f '{{{{join .RepoDigests \" \"}}}}' antar/{img}", check=False)
         reg = [x for x in d.split() if x.startswith("ghcr.io/")]
         out[f"digest_{img}"] = reg[0] if reg else ""
+    # the media snapshot served by the labs (lab/images.sh pull-media); empty for a local crawl
+    mark = root / "lab" / "media" / ".digest"
+    out["digest_media"] = mark.read_text().strip() if mark.exists() else ""
     return out
