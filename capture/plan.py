@@ -156,8 +156,8 @@ def build(tier):
         if st.get("needs") and not ext_files(st["needs"]):
             skip = f"no pcaps in dataset/{st['needs']}"
         combos = st.get("combos") or [[a] for a in st["apps"]]
-        if stage == "realism":
-            combos = [st["apps"]]
+        if stage in ("realism", "short"):
+            combos = [st["apps"]]  # one run carrying all the stage's apps
         for c, inner in set_a(st["set"]):
             for rep in range(1 + rep0, st["reps"] + 1 + rep0):
                 key = json.dumps(c, sort_keys=True)
@@ -171,7 +171,7 @@ def build(tier):
                 rng.shuffle(order)
                 for pos, i in enumerate(order):
                     apps = combos[i]
-                    scen = "_".join(apps) if stage != "realism" else "inet"
+                    scen = {"realism": "inet", "short": "short"}.get(stage, "_".join(apps))
                     r_rng = random.Random(f"{seed}:{stage}:{scen}:{key}:{rep}")
                     r = mk(tier, stage, scen, cfg, rep, r_rng.randrange(2**31), apps, st["duration_s"],
                            replayed=stage in ("whatsapp", "public"), internet=stage == "realism",
@@ -208,24 +208,63 @@ def units(runs):
     return out
 
 
-def assign_split(runs, test=0.2):
-    """80/20 per unit, stratified by (tier, stage) for tunnel groups and by
-    (tier, stage, scenario) for single runs: the 20% of units with the lowest
-    hash go to test. all runs of a tunnel group share its split, so train and
-    test never share a tunnel (its sas, spis and keys)."""
-    strata = {}
-    for uid, rs in units(runs).items():
-        r = rs[0]
-        k = (r["tier"], r["stage"]) if r["group"] else (r["tier"], r["stage"], r["scenario"])
-        strata.setdefault(k, []).append(uid)
+def assign_split(runs, test_units=0.25, test_runs=0.2):
+    """deterministic splits, never across a tunnel.
+
+    tunnel groups (traffic-like stages): 25% test per (tier, stage), stratified by
+    (mode, esp shape) so each pair contributes its share; inside a stratum the test
+    tunnels rotate over (family, nat-t) such that the two modes of a shape get
+    opposite family and nat-t, and every (family, nat-t) combination is used equally.
+    with the 32 set-A tunnels: exactly one test tunnel per shape x mode pair (8).
+    single runs (handshake, edge): 20% test per (tier, stage, scenario), lowest hash."""
     split = {}
-    for uids in strata.values():
-        uids.sort(key=lambda u: h(u, 16))
-        n = round(len(uids) * test)
-        for i, u in enumerate(uids):
-            split[u] = "test" if i < n else "train"
+    us = units(runs)
+    strata = {}
+    for uid, rs in us.items():
+        r = rs[0]
+        if r["group"]:
+            strata.setdefault(("g", r["tier"], r["stage"]), []).append(uid)
+        else:
+            strata.setdefault(("r", r["tier"], r["stage"], r["scenario"]), []).append(uid)
+    # (family, nat-t) rotation: index i and i + 2 differ in both
+    combos = [("v4", False), ("v4", True), ("v6", True), ("v6", False)]
+    for k, uids in strata.items():
+        if k[0] == "r":
+            uids.sort(key=lambda u: h(u, 16))
+            n = round(len(uids) * test_runs)
+            for i, u in enumerate(uids):
+                split[u] = "test" if i < n else "train"
+            continue
+        by = {}
+        for u in uids:
+            c = us[u][0]["config"]
+            by.setdefault((c["mode"], c.get("esp_shape", c["esp_proposal"])), []).append(u)
+        pairs = sorted(by)
+        want = round(len(uids) * test_units)
+        # largest remainder: how many test tunnels each (mode, shape) stratum gives
+        quota = {p: len(by[p]) * want / len(uids) for p in pairs}
+        take = {p: int(quota[p]) for p in pairs}
+        for p in sorted(pairs, key=lambda p: (-(quota[p] - take[p]), p))[:want - sum(take.values())]:
+            take[p] += 1
+        rot = int(h(f"{k[1]}:{k[2]}", 4), 16) % 4
+        shapes = sorted({p[1] for p in pairs})
+        for p in pairs:
+            mode, shape = p
+            start = (rot + shapes.index(shape) + (2 if mode == "transport" else 0)) % 4
+            def order(u, start=start):
+                c = us[u][0]["config"]
+                ci = combos.index((c["outer_family"], bool(c["encap"])))
+                return ((ci - start) % 4, h(u, 16))
+            ranked = sorted(by[p], key=order)
+            for j, u in enumerate(ranked):
+                split[u] = "test" if j < take[p] else "train"
     for r in runs:
         r["split"] = split[r["group"] or r["run_id"]]
+
+
+def design_sha():
+    """fingerprint of the experiment design: every shard of a tier must share it"""
+    return hashlib.sha256(b"".join((here / f).read_bytes() for f in ("matrix.yaml", "edge.yaml", "netem.yaml"))).hexdigest()[:16]
 
 
 def cost(run):

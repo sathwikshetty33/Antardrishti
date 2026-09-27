@@ -761,6 +761,8 @@ def one(run, attempt, labst):
                  "bytes": sum(p.stat().st_size for p in d.iterdir() if p.is_file()),
                  "ts_precision": {"outer": "ns", "ike": "ns",
                                   "inner": "us" if run["config"]["mode"] == "transport" else "ns"},
+                 "plan": {"tier_seed": plan.matrix["seeds"].get(run["tier"]), "design_sha": plan.design_sha(),
+                          "code": sh(f"git -C {root} rev-parse --short HEAD", check=False)[1].strip()},
                  "lab_id": topo.lab_id, "labs": n_labs,
                  "concurrency": {"max": max(samples["conc"] or [1]),
                                  "mean": round(sum(samples["conc"]) / max(1, len(samples["conc"])), 2),
@@ -857,21 +859,47 @@ def dry_run(runs, todo, labs, slices=1):
           f"mid_stream: {mid}/{len(tr)} traffic runs = {mid / max(1, len(tr)):.0%} (min 15%)")
     print(f"\n{labs} lab(s) per machine, {cores} cores; heavy (video/web/bulk) one at a time, "
           f"voip never next to heavy\n")
-    print(f"{'shard':<8}{'runs':>6}{'serial':>9}{'wall':>9}{'core-h':>8}{'storage':>10}")
+    setup = plan.matrix.get("shard_setup_s", 0) if slices > 1 else 0
+    print(f"{'shard':<7}{'tunnels':>8}{'heavy':>6}{'light':>6}{'voip':>5}{'wall':>9}{'+setup':>8}"
+          f"{'core-h':>8}{'storage':>9}   modes / shapes")
     todo_runs = [r for r in runs if r["run_id"] in todo and not r.get("skip")]
-    tot = [0, 0, 0, 0]
+    rows = []
     for i in range(1, slices + 1):
         sl = plan.slice_units(todo_runs, i, slices) if slices > 1 else todo_runs
-        serial = sum(plan.cost(r) for r in sl)
         wall, _ = placement.simulate(sl, labs, plan.cost)
         gb, n = storage(sl, {r["run_id"] for r in sl})
-        tot = [tot[0] + len(sl), tot[1] + serial, max(tot[2], wall), tot[3] + gb]
-        print(f"{f'{i}/{slices}':<8}{len(sl):>6}{hms(serial):>9}{hms(wall):>9}{wall / 3600 * cores:>8.1f}"
-              f"{gb:>9.2f}G")
+        grp = {r["group"]: r["config"] for r in sl if r["group"]}
+        modes = {c["mode"] for c in grp.values()}
+        shapes = {c.get("esp_shape") for c in grp.values() if c.get("esp_shape")}
+        cls = Counter(r["cls"] for r in sl)
+        rows.append({"i": i, "tunnels": len(grp), "cls": cls, "wall": wall, "tot": wall + setup, "gb": gb,
+                     "modes": modes, "shapes": shapes})
+    all_shapes = {r["config"].get("esp_shape") for r in todo_runs if r["group"] and r["config"].get("esp_shape")}
+    all_modes = {r["config"]["mode"] for r in todo_runs if r["group"]}
+    flags = []
+    for x in rows:
+        ch = x["tot"] * cores / 3600
+        print(f"{f'{x[chr(105)]}/{slices}':<7}{x['tunnels']:>8}{x['cls']['heavy']:>6}{x['cls']['light']:>6}"
+              f"{x['cls']['voip']:>5}{hms(x['wall']):>9}{hms(x['tot']):>8}{ch:>8.1f}{x['gb']:>8.2f}G   "
+              f"{','.join(sorted(x['modes'])) or '-'} / {len(x['shapes'])} of {len(all_shapes)}")
+        if all_modes - x["modes"]:
+            flags.append(f"shard {x['i']}/{slices} lacks mode {', '.join(sorted(all_modes - x['modes']))}")
+        if len(all_shapes - x["shapes"]) > 1:
+            flags.append(f"shard {x['i']}/{slices} lacks {len(all_shapes - x['shapes'])} wire shapes")
     if slices > 1:
-        print(f"{'all':<8}{tot[0]:>6}{hms(tot[1]):>9}{hms(tot[2]):>9}"
-              f"{sum(placement.simulate(plan.slice_units(todo_runs, i, slices), labs, plan.cost)[0] for i in range(1, slices + 1)) / 3600 * cores:>8.1f}"
-              f"{tot[3]:>9.2f}G   (wall = slowest shard; core-h and storage summed)")
+        lo, hi = min(x["tot"] for x in rows), max(x["tot"] for x in rows)
+        if hi > 1.15 * lo:
+            flags.append(f"longest shard is {hi / lo - 1:.0%} longer than the shortest (limit 15%)")
+        print(f"{'all':<7}{sum(x['tunnels'] for x in rows):>8}{sum(x['cls']['heavy'] for x in rows):>6}"
+              f"{sum(x['cls']['light'] for x in rows):>6}{sum(x['cls']['voip'] for x in rows):>5}"
+              f"{hms(max(x['wall'] for x in rows)):>9}{hms(hi):>8}"
+              f"{sum(x['tot'] for x in rows) * cores / 3600:>8.1f}{sum(x['gb'] for x in rows):>8.2f}G   "
+              f"(wall = slowest shard; core-hours and storage summed; setup {hms(setup)} per shard, estimated)")
+    for f in flags:
+        print("FLAG:", f)
+    if slices > 1 and not flags:
+        print("balance: every shard within 15% of the others, with both modes and all wire shapes")
+    tot = [0, 0, max(x["tot"] for x in rows), 0]
     print("\nstorage from the median measured size per scenario (manifest ok runs); "
           "free quotas: 120 core-hours/month, 15 GB-month")
     if tot[2] > 2 * 3600:
@@ -900,8 +928,14 @@ def storage(runs, todo):
     tot = 0
     for r in runs:
         if r["run_id"] in todo and not r.get("skip"):
-            v = sizes.get(("s", r["scenario"])) or sizes.get(("t", r["stage"])) or sizes["all"]
-            tot += statistics.median(v)
+            v = sizes.get(("s", r["scenario"]))
+            if v:
+                tot += statistics.median(v)
+            elif len(r["apps"]) > 1 and all(sizes.get(("s", a)) for a in r["apps"]):
+                # unmeasured mixture: its apps' medians added (they overlap in time, so an upper bound)
+                tot += sum(statistics.median(sizes[("s", a)]) for a in r["apps"])
+            else:
+                tot += statistics.median(sizes.get(("t", r["stage"])) or sizes["all"])
     return tot / 1e9, len(sizes["all"])
 
 
@@ -969,6 +1003,36 @@ def worker(k, batch_file):
     log(f"lab {k} done")
 
 
+def status(runs, last, tries):
+    """completion of a selection: ok, exhausted (3 attempts, not ok), pending"""
+    sys.path.insert(0, str(root / "tools"))
+    import checkmeta
+    by = defaultdict(Counter)
+    pending, exhausted = [], []
+    for r in runs:
+        if r.get("skip"):
+            by[r["stage"]]["skipped"] += 1
+        elif last.get(r["run_id"]) == "ok":
+            by[r["stage"]]["ok"] += 1
+        elif tries[r["run_id"]] >= attempts:
+            by[r["stage"]]["exhausted"] += 1
+            exhausted.append(f"{r['run_id']} ({last.get(r['run_id'])})")
+        else:
+            by[r["stage"]]["pending"] += 1
+            pending.append(r["run_id"])
+    for st, c in by.items():
+        print(f"{st:<11}" + "  ".join(f"{k} {v}" for k, v in sorted(c.items())))
+    bad = [r["run_id"] for r in runs if last.get(r["run_id"]) == "ok" and checkmeta.check(raw / r["run_id"])]
+    for x in exhausted[:20]:
+        print("  exhausted:", x)
+    for x in bad[:20]:
+        print("  folder fails checkmeta:", x)
+    done = not pending and not bad
+    print(f"{'COMPLETE' if done else 'NOT COMPLETE'}: {len(pending)} pending, {len(exhausted)} exhausted "
+          f"(rerun with --fill-gaps), {len(bad)} invalid folders")
+    sys.exit(0 if done else 1)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tier", required=True, choices=sorted(plan.matrix["tiers"]))
@@ -983,6 +1047,7 @@ def main():
     ap.add_argument("--rep", type=int, nargs="*", help="only these reps")
     ap.add_argument("--ids", nargs="*", help="only these run ids")
     ap.add_argument("--list", action="store_true", help="print run ids")
+    ap.add_argument("--status", action="store_true", help="is this selection (slice) complete? exit 1 if not")
     ap.add_argument("--yes", action="store_true", help="confirm a batch estimated over 2 hours")
     ap.add_argument("--no-build", action="store_true")
     ap.add_argument("--worker", type=int, help=argparse.SUPPRESS)
@@ -1003,6 +1068,8 @@ def main():
         for r in runs:
             print(r["run_id"], r["split"], r["cls"], r.get("netem"), r.get("capture_start"),
                   last.get(r["run_id"], "-"), r.get("skip") or "")
+    if args.status:
+        return status(runs, last, tries)
     if args.dry_run or args.list:
         # estimates for every shard of the chosen split
         full = select(args) + (gaps(select(args), last) if args.fill_gaps else [])

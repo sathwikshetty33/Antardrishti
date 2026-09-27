@@ -35,11 +35,12 @@ def akey(cfg):
 
 
 def app_targets(tiers):
-    """p0 runs one tunnel group per set-A config (32 runs per app, 6 in test at
-    80/20); the p2 second rep brings every app back to the original 40 / 1500 / 8"""
+    """p0 runs one tunnel group per set-A config (32 runs per app; 8 test tunnels,
+    one per shape x mode pair, so 8 test runs per app); the p2 second rep brings
+    every app back to the original 40 / 1500"""
     if "p2" in tiers:
         return {"runs": 40, "windows": 1500, "test": 8}
-    return {"runs": 32, "windows": 1400, "test": 6}
+    return {"runs": 32, "windows": 1400, "test": 8}
 
 
 def bkey(cfg):
@@ -90,6 +91,13 @@ def evaluate(tiers):
             sc = "_".join(combo)
             n = sum(m["scenario"] == sc for m in mix)
             row(rows, "p1", f"mixture {sc}", ">= 8", n, n >= 8, notok([r for r in allrun if r["scenario"] == sc]))
+
+    tun = Counter(akey(m["config"]) for m in ok if m["stage"] in ("traffic", "short") and m.get("group_pos", 0) == 0)
+    tshort = [k for k in space if tun[(k["mode"], k["esp"], k["outer_family"], k["encap"])] < 3]
+    row(rows, "p0", "each set-A config: tunnels (traffic + short)", f">= 3 (all {na})",
+        f"{na - len(tshort)}/{na} configs meet it", not tshort,
+        [f"{k['mode']}/{k['esp']}/{k['outer_family']}/encap={k['encap']}: "
+         f"{tun[(k['mode'], k['esp'], k['outer_family'], k['encap'])]}" for k in tshort])
 
     hs = [m for m in ok if m["stage"] == "handshake" and m["observed"].get("child_rekeys", 0) >= 1]
     hper = Counter(bkey(m["config"]) for m in hs)
