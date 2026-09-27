@@ -76,9 +76,11 @@ tiers:
     - {stage: handshake, set: b, apps: [icmp, web_light], reps: 3, duration_s: 150}
     - {stage: edge, level: p0, reps: 3}
   p1:
+    # every p1 traffic stage (mixtures, anchor, chat, whatsapp, realism) is captured
+    # alone on its machine (--labs 1) and recorded timing_valid; p1 edge cases are not
     - stage: mixtures
-      set: a12
-      duration_s: 120
+      set: a8
+      duration_s: 90
       reps: 1
       combos:
         - [voip, video]
@@ -91,9 +93,12 @@ tiers:
         - [chat, web]
         - [email, bulk]
         - [voip, video, web]
-    - {stage: chat, set: a, apps: [chat], reps: 1, duration_s: 90}
+    # timing-valid anchors: the six single apps on the mixtures' 8 configs (p0
+    # traffic was captured with 3 parallel labs, so its timing is biased)
+    - {stage: anchor, set: a8, apps: [voip, video, web, email, icmp, bulk], reps: 1, duration_s: 60}
+    - {stage: chat, set: a, apps: [chat], reps: 1, duration_s: 60}
     - {stage: whatsapp, set: a_tunnel, apps: [whatsapp], reps: 1, duration_s: 90, needs: external/whatsapp}
-    - {stage: realism, set: inet8, apps: [web, youtube], reps: 2, duration_s: 90}
+    - {stage: realism, set: inet8, apps: [web, youtube], reps: 1, duration_s: 90}
     - {stage: edge, level: p1, reps: 3}
   p2:
     - {stage: traffic, set: a, apps: [voip, video, web, email, icmp, bulk], reps: 1, rep_offset: 1, duration_s: 90}
@@ -111,8 +116,10 @@ tiers:
 
 # subsets of set a (same esp wire shapes; key size drawn per tunnel)
 subsets:
-  # both modes, gcm + cbc, v4 + v6 -> 2 x 3 x 2 = 12
-  a12: {mode: [tunnel, transport], esp: [gcm16, sha256, sha1], outer_family: [v4, v6], encap: [false]}
+  # one config per esp wire shape x mode -> 4 x 2 = 8. family and nat-t rotate as
+  # for the test tunnels: the two modes of a shape get opposite family and nat-t,
+  # and every (family, nat-t) combination is used twice
+  a8: {mode: [tunnel, transport], esp: [gcm16, sha1, sha256, sha384], outer_family: [v4, v6], encap: [false, true], pick: [0, 5, 11, 14, 19, 22, 24, 29]}
   # replay (tcpreplay injects raw frames, which bypass xfrm, so it can only
   # enter the tunnel from host_a through gw_a): tunnel only -> 4 x 2 x 2 = 16.
   # inner is v4: the captures are v4 and tcprewrite cannot map v4 to v6

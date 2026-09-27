@@ -10,7 +10,8 @@ killed batch (idle timeout, ctrl-c) continues where it stopped. batches over
 --labs n runs n labs side by side on this machine, one worker process each
 (placement rules in capture/placement.py). --slice i/n takes a deterministic,
 balanced share of the plan so teammates' codespaces can split it (merge the
-manifests with tools/merge.py).
+manifests with tools/merge.py). after p0 a slice runs in its seeded order
+(plan.deal), and timing-sensitive runs are captured alone on the machine.
 """
 import argparse
 import hashlib
@@ -49,6 +50,7 @@ attempts = 3           # first try + 2 retries
 
 logfile = None   # dataset/raw/_logs/<tier>-<stamp>.log: survives codespace restarts, unlike /tmp
 lab_versions = {}  # package versions + image ids of this batch (topo.versions)
+plan_id = ""       # plan.plan_sha of the batch's tier, recorded in every run
 n_labs = int(os.environ.get("ANTAR_LABS", "1"))  # labs running side by side in this batch
 
 
@@ -68,6 +70,8 @@ def history():
         for line in manifest.read_text().splitlines():
             if line.strip():
                 m = json.loads(line)
+                if "annotation" in m:
+                    continue
                 last[m["run_id"]] = m["status"]
                 tries[m["run_id"]] += 1
     return last, tries
@@ -157,9 +161,10 @@ def reset(run):
 
 
 def reset_traffic(run):
-    """between two runs on a kept tunnel: no netem, edge rules, captures, noise or
-    generators left over. the tunnel (charon, sas, policies) stays up"""
+    """between two runs on a kept tunnel: no netem, edge rules, captures, noise,
+    generators or internet dns left over. the tunnel (charon, sas, policies) stays up"""
     topo.netem(None)
+    topo.inet_dns(False)
     dx(r_, "nft delete table inet edge 2>/dev/null; pkill tcpdump; pkill tcpreplay; true", check=False)
     for ipt in ("iptables", "ip6tables"):
         dx(topo.c["gw_b"], f"while {ipt} -D OUTPUT -p udp -m multiport --sports 500,4500 -j DROP 2>/dev/null; do :; done", check=False)
@@ -217,13 +222,23 @@ def half_open_flood(run):
 
 
 def replay_esp(run, d):
-    """e26: grab 40 esp packets gw_a -> gw_b on the router and inject them again toward gw_b"""
+    """e26: grab up to 40 esp packets gw_a -> gw_b on the router and inject them again
+    toward gw_b. the router image has no tcpreplay: the host's runs in the router's
+    network namespace (same interface, same frames)"""
     dev = topo.iface(r_, topo.rtr["b"]["v4"])
     src = topo.gw["a"][run["config"]["outer_family"]]
     host = "ip6" if ":" in src else "ip"
-    dx(r_, f"timeout 10 tcpdump -i {dev} -c 40 -w /tmp/replay.pcap '{host} src {src} and esp' >/dev/null 2>&1; true", timeout=30)
-    rc, out = dx(r_, f"tcpreplay -q -i {dev} /tmp/replay.pcap", check=False)
-    return {"replayed_packets": 40, "rc": rc, "out": out[-200:]}
+    # a fresh file each time: in the sticky /tmp (fs.protected_regular) tcpdump cannot
+    # overwrite the one an earlier run left, and would replay a dead sa's packets
+    dx(r_, f"rm -f /tmp/replay.pcap; timeout 10 tcpdump -i {dev} -c 40 -w /tmp/replay.pcap "
+           f"'{host} src {src} and esp' >/dev/null 2>&1; true", timeout=30)
+    f = raw / f".replay-{topo.lab_id}.pcap"
+    sh(f"docker cp {r_}:/tmp/replay.pcap {f}")
+    n = int(sh(f"tcpdump -nr {f} 2>/dev/null | wc -l", check=False)[1] or 0)
+    pid = sh(f"docker inspect -f '{{{{.State.Pid}}}}' {r_}")[1].strip()
+    rc, out = sh(f"sudo nsenter -t {pid} -n tcpreplay -q -i {dev} {f}", check=False)
+    f.unlink()
+    return {"replayed_packets": n, "rc": rc, "out": out[-200:]}
 
 
 # ---------------------------------------------------------------- apps
@@ -307,6 +322,8 @@ def execute_reuse(run, d, labst):
         time.sleep(1)
     else:
         reset_traffic(run)
+    if cfg.get("internet"):
+        notes["dns"] = topo.inet_dns(True)
     for s_ in "ab":
         (d / f"swanctl_{s_}.conf").write_text(labst["confs"][s_])
     if run.get("netem") and run["netem"] != "lan":
@@ -363,11 +380,19 @@ def execute(run, d, labst):
     if "extra_initiators" in st:
         over = json.loads(json.dumps(over))
         over.setdefault("b", {})["extra_conns"] = [topo.multi_conn(g, "r") for g in topo.multi]
+    if "voip_child" in st:
+        # e23: a second child sa for voip (udp: sip and rtp) next to the first one for the rest
+        over = json.loads(json.dumps(over))
+        f = cfg["inner_family"]
+        for s_, p_ in (("a", "b"), ("b", "a")):
+            over.setdefault(s_, {})["children"] = [{}, {"name": "voip", "local_ts": f"{topo.lan[s_][f]}[udp]",
+                                                         "remote_ts": f"{topo.lan[p_][f]}[udp]"}]
     confs = topo.deploy(cfg, over, backend)
     for s in "ab":
         (d / f"swanctl_{s}.conf").write_text(confs[s])
     if cfg.get("internet"):
         topo.nat(True)
+        notes["dns"] = topo.inet_dns(True)
     if run.get("netem") and run["netem"] != "lan":
         topo.netem(plan.netems[run["netem"]])
     notes.update(pre_setup(run))
@@ -381,6 +406,9 @@ def execute(run, d, labst):
 
     def initiate():
         rc, out = topo.initiate(timeout=min(60, dur), check=False)
+        if "voip_child" in st:
+            rc2, out2 = dx(topo.c["gw_a"], "swanctl --initiate --child voip --timeout 20", check=False, timeout=35)
+            rc, out = rc or rc2, out + "\n" + out2
         init.update(rc=rc, out=out[-600:], t=time.time())
         mark("initiate_done", rc=rc)
 
@@ -667,11 +695,15 @@ def app_ok(app, evs):
         return any(e["event"] == "message" for e in ev)
     if app in ("icmp", "icmp_big"):
         return any(" 0 received" not in e.get("summary", "") for e in ev)
+    if app == "youtube":
+        # blocked (datacenter address) is recorded, never worked around
+        return any(e["event"] in ("play", "blocked") for e in ev)
     return True
 
 
-def validate(run, o, sched):
-    """-> (status, reasons)"""
+def validate(run, o, sched, last=True):
+    """-> (status, reasons). an app that reported a block (youtube) fails the attempt
+    so the normal retries run; the last attempt keeps the run and records the block"""
     why = []
     apps = [e for e in sched if e.get("event") == "app"]
     for e in apps:
@@ -700,6 +732,8 @@ def validate(run, o, sched):
         why.append("no child rekey observed")
     if run.get("replayed") and not any(e.get("event") == "replay" for e in sched):
         why.append("replay did not run")
+    if o.get("blocked") and not last:
+        why += [f"{a} blocked ({r}): retried, the last attempt records it" for a, r in o["blocked"].items()]
     return ("failed", why) if why else ("ok", [])
 
 
@@ -718,7 +752,7 @@ def finish(d):
     return sums
 
 
-def one(run, attempt, labst):
+def one(run, attempt, labst, last=True):
     # capture into a work folder: an earlier ok folder is only replaced once this
     # attempt is complete and ok (a killed attempt must never destroy good data)
     final = raw / run["run_id"]
@@ -744,13 +778,17 @@ def one(run, attempt, labst):
         run["_timeline"] = [{**x, "t": round(x["t"] - t0, 3)} for x in notes["timeline"]]
         o = observed(run, d, t0, sched, notes.pop("_full_logs", None))
         o["windows_2s"] = esp_windows(o.pop("_esp_times"), t0, sched, run["duration_s"])
-        status, why = validate(run, o, sched)
+        # apps that reported a block (youtube from a datacenter address): recorded, never worked around
+        o["blocked"] = {e["app"]: e.get("reason", "") for e in sched if e.get("event") == "blocked"}
+        status, why = validate(run, o, sched, last)
     except Exception as e:
         why = [f"exception: {str(e).strip()[-600:]}"]
         labst.update(tunnel=None)
     stop.set()
     smp.join(timeout=5)
     t_end = time.time()
+    over = placement.overlaps(topo.lab_id, t_start, t_end)
+    conc = max(samples["conc"] or [1])
     sums = finish(d)
     meta = {k: v for k, v in run.items() if not k.startswith("_") and k not in ("over", "expect", "setup")}
     meta.update({"expected": expected(run), "observed": o, "status": status, "reasons": why,
@@ -765,11 +803,13 @@ def one(run, attempt, labst):
                  "ts_precision": {"outer": "ns", "ike": "ns",
                                   "inner": "us" if run["config"]["mode"] == "transport" else "ns"},
                  "plan": {"tier_seed": plan.matrix["seeds"].get(run["tier"]), "design_sha": plan.design_sha(),
-                          "code": sh(f"git -C {root} rev-parse --short HEAD", check=False)[1].strip()},
+                          "plan_sha": plan_id, "code": sh(f"git -C {root} rev-parse --short HEAD", check=False)[1].strip()},
                  "lab_id": topo.lab_id, "labs": n_labs,
-                 "concurrency": {"max": max(samples["conc"] or [1]),
+                 # timing-sensitive and captured alone on the machine (no other run overlapped)
+                 "timing_valid": bool(run.get("timed")) and conc == 1 and not over,
+                 "concurrency": {"max": conc,
                                  "mean": round(sum(samples["conc"]) / max(1, len(samples["conc"])), 2),
-                                 "overlapping": placement.overlaps(topo.lab_id, t_start, t_end)},
+                                 "overlapping": over},
                  "load": {"cpu_busy_mean": round(sum(samples["cpu"]) / max(1, len(samples["cpu"])), 1),
                           "cpu_busy_max": max(samples["cpu"] or [0]),
                           "loadavg_start": [round(x, 2) for x in la0],
@@ -835,12 +875,30 @@ def splits(last):
         for line in manifest.read_text().splitlines():
             if line.strip():
                 m = json.loads(line)
-                out[m["run_id"]] = (m["status"], m.get("split"))
+                if "annotation" not in m:
+                    out[m["run_id"]] = (m["status"], m.get("split"))
     return out
 
 
 def hms(s):
     return f"{int(s // 3600)}h{int(s % 3600 // 60):02d}m"
+
+
+def sliced(runs, i, n):
+    """slice i/n of a plan as a batch takes it: seeded order after p0, the
+    round-robin dealer for the legacy tiers"""
+    if runs and runs[0]["tier"] not in plan.legacy:
+        return plan.deal(runs, i, n)
+    return plan.slice_units(runs, i, n) if n > 1 else runs
+
+
+def identity(tier):
+    """what every slice of a tier must share: seed, design, plan and images"""
+    lock = root / "lab" / "images.lock"
+    imgs = " ".join(f"{a}={b.split(':')[-1][:12]}" for a, b in (l.split() for l in lock.read_text().splitlines())) \
+        if lock.exists() else "no images.lock"
+    return (f"tier {tier} seed {plan.matrix['seeds'][tier]} design {plan.design_sha()} "
+            f"plan {plan.plan_sha(plan.build(tier))} images {imgs}")
 
 
 def dry_run(runs, todo, labs, slices=1):
@@ -873,7 +931,7 @@ def dry_run(runs, todo, labs, slices=1):
     todo_runs = [r for r in runs if r["run_id"] in todo and not r.get("skip")]
     rows = []
     for i in range(1, slices + 1):
-        sl = plan.slice_units(todo_runs, i, slices) if slices > 1 else todo_runs
+        sl = [r for r in sliced(runs, i, slices) if r["run_id"] in todo and not r.get("skip")]
         wall, _ = placement.simulate(sl, labs, plan.cost)
         gb, n = storage(sl, {r["run_id"] for r in sl})
         grp = {r["group"]: r["config"] for r in sl if r["group"]}
@@ -908,7 +966,8 @@ def dry_run(runs, todo, labs, slices=1):
     if slices > 1 and not flags:
         print("balance: every shard within 15% of the others, with both modes and all wire shapes")
     tot = [0, 0, max(x["tot"] for x in rows), 0]
-    print("\nstorage from the median measured size per scenario (manifest ok runs); "
+    print(f"\nplan: {identity(runs[0]['tier'])}")
+    print("storage from the median measured size per scenario (manifest ok runs); "
           "free quotas: 120 core-hours/month, 15 GB-month")
     if tot[2] > 2 * 3600:
         print("a shard is over 2 hours: ask before starting (CLAUDE.md section 1), then pass --yes")
@@ -959,10 +1018,7 @@ def disk():
 def select(args):
     """the plan, sliced first (a shard's share never depends on other filters),
     then narrowed by --scenario / --rep / --ids"""
-    runs = plan.build(args.tier)
-    si, sn = parse_slice(args.slice)
-    if sn > 1:
-        runs = plan.slice_units(runs, si, sn)
+    runs = sliced(plan.build(args.tier), *parse_slice(args.slice))
     if args.scenario:
         runs = [r for r in runs if r["scenario"] in args.scenario or r["stage"] in args.scenario]
     if args.rep:
@@ -997,11 +1053,12 @@ def live_workers():
 
 def worker(k, batch_file):
     """one lab: bring it up, then claim and run until the batch is exhausted"""
-    global logfile, lab_versions
+    global logfile, lab_versions, plan_id
     b = json.loads(Path(batch_file).read_text())
     logfile = Path(b["log"]).with_name(Path(b["log"]).stem + f"-lab{k}.log")
     runs = b["runs"]
     ids = {r["run_id"] for r in runs}
+    plan_id = plan.plan_sha(plan.build(runs[0]["tier"]))
     topo.up(build=False)
     lab_versions = topo.versions()
     log(f"lab {k} up:", json.dumps(lab_versions))
@@ -1027,7 +1084,7 @@ def worker(k, batch_file):
             continue
         t0, status = time.time(), "failed"
         for a in range(tries[run["run_id"]] + 1, tries[run["run_id"]] + attempts + 1):
-            status, why = one(run, a, labst)
+            status, why = one(run, a, labst, last=a == tries[run["run_id"]] + attempts)
             log(f"lab {k} {run['run_id']} attempt {a}: {status}" + (f" - {'; '.join(why)[:300]}" if why else ""))
             if status == "ok":
                 break
@@ -1104,14 +1161,18 @@ def main():
     if args.status:
         return status(runs, last, tries)
     if args.dry_run or args.list:
-        # estimates for every shard of the chosen split
+        # estimates for every shard of the chosen split: the whole plan dealt as the
+        # batches deal it, then narrowed to the selection
         full = plan.build(args.tier)
+        want = None
         if args.scenario or args.rep or args.ids is not None:
-            full = [r for r in select(argparse.Namespace(**{**vars(args), "slice": None}))]
-        full += gaps(full, last) if args.fill_gaps else []
-        ftodo = {r["run_id"] for r in full if last.get(r["run_id"]) != "ok" and not r.get("skip")}
-        dry_run(full, ftodo, args.labs, sn)
+            want = {r["run_id"] for r in select(argparse.Namespace(**{**vars(args), "slice": None}))}
+        extra = gaps(full, last) if args.fill_gaps else []
+        ftodo = {r["run_id"] for r in full if last.get(r["run_id"]) != "ok" and not r.get("skip")
+                 and (want is None or r["run_id"] in want)} | {r["run_id"] for r in extra}
+        dry_run(full + extra, ftodo, args.labs, sn)
         return
+    todo.sort(key=lambda r: r.get("order", 10 ** 9))
     if args.limit:
         todo = todo[:args.limit]
     global logfile
@@ -1119,6 +1180,7 @@ def main():
     stamp = time.strftime('%Y%m%d-%H%M%S')
     logfile = raw / "_logs" / f"{args.tier}-{stamp}.log"
     log("args:", " ".join(sys.argv[1:]))
+    log("plan:", identity(args.tier))
     wall, _ = placement.simulate(todo, args.labs, plan.cost)
     log(f"{len(todo)} runs to do ({len(runs) - len(todo)} done or skipped), "
         f"estimate {hms(wall)} with {args.labs} lab(s)")
@@ -1132,9 +1194,13 @@ def main():
     if free < 5:
         sys.exit(f"only {free:.1f} GB free on /workspaces: run lab/cleanup.sh, export and prune old runs first")
     if not args.no_build:
-        # pinned registry images when lab/images.lock exists (the same digests on
-        # every shard), else a local build
+        # the pinned registry images and media snapshot of lab/images.lock (the same
+        # digests on every shard); a refused pull stops the batch, never a local build
         sh(f"bash {root}/lab/images.sh pull", timeout=3600)
+        lock = dict(l.split() for l in (root / "lab" / "images.lock").read_text().splitlines())
+        mark = root / "lab" / "media" / ".digest"
+        if "media" in lock and (not mark.exists() or mark.read_text().strip() != lock["media"]):
+            sh(f"bash {root}/lab/images.sh pull-media", timeout=3600)
     # one batch per machine: refuse while workers of another batch are alive
     others = live_workers()
     if others:

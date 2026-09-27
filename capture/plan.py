@@ -24,6 +24,13 @@ netems = yaml.safe_load((here / "netem.yaml").read_text())
 # scheduling classes: heavy apps load cpu (chrome decode, gbit esp + ssh); at most
 # one heavy run per machine, and voip never runs next to a heavy one
 heavy = {"video", "web", "bulk", "youtube"}
+# timing-sensitive stages: each run is captured alone on its machine (placement)
+# and records timing_valid. parallel labs bias packet timing (dataset/advval.json);
+# edge, handshake and short runs may share a machine
+timed = {"traffic", "anchor", "mixtures", "chat", "whatsapp", "realism", "public"}
+# tiers sliced with the round-robin dealer (slice_units) and its split tie-break:
+# p0 and the adversarial tiers were captured with them, so they stay reproducible
+legacy = {"p0", "avs", "avp"}
 
 
 def h(s, n=8):
@@ -111,7 +118,7 @@ def mk(tier, stage, scenario, cfg, rep, seed, apps, duration, **kw):
             "rep": rep, "seed": seed, "config": cfg, "apps": apps,
             "duration_s": duration, "edge_case": None, "replayed": False,
             "internet": False, "group": None, "group_pos": 0, "group_size": 1,
-            "capture_start": "before_tunnel", "capture_delay_s": 0,
+            "capture_start": "before_tunnel", "capture_delay_s": 0, "timed": stage in timed,
             "cls": "heavy" if set(apps) & heavy else ("voip" if "voip" in apps else "light"), **kw}
 
 
@@ -216,7 +223,9 @@ def assign_split(runs, test_units=0.25, test_runs=0.2):
     tunnels rotate over (family, nat-t) such that the two modes of a shape get
     opposite family and nat-t, and every (family, nat-t) combination is used equally.
     with the 32 set-A tunnels: exactly one test tunnel per shape x mode pair (8).
-    single runs (handshake, edge): 20% test per (tier, stage, scenario), lowest hash."""
+    single runs (handshake, edge): 20% test per (tier, stage, scenario), lowest hash.
+    after p0, a stage with fewer test tunnels than strata spreads them: modes
+    alternate and shapes rotate per stage, so both modes reach test."""
     split = {}
     us = units(runs)
     strata = {}
@@ -244,10 +253,16 @@ def assign_split(runs, test_units=0.25, test_runs=0.2):
         # largest remainder: how many test tunnels each (mode, shape) stratum gives
         quota = {p: len(by[p]) * want / len(uids) for p in pairs}
         take = {p: int(quota[p]) for p in pairs}
-        for p in sorted(pairs, key=lambda p: (-(quota[p] - take[p]), p))[:want - sum(take.values())]:
-            take[p] += 1
         rot = int(h(f"{k[1]}:{k[2]}", 4), 16) % 4
         shapes = sorted({p[1] for p in pairs})
+
+        def spread(p):
+            if k[1] in legacy:
+                return p
+            j = (shapes.index(p[1]) - rot) % len(shapes)
+            return ((j + (p[0] == "transport")) % 2, j)
+        for p in sorted(pairs, key=lambda p: (-(quota[p] - take[p]), spread(p)))[:want - sum(take.values())]:
+            take[p] += 1
         for p in pairs:
             mode, shape = p
             start = (rot + shapes.index(shape) + (2 if mode == "transport" else 0)) % 4
@@ -278,6 +293,14 @@ def cost(run):
     return t
 
 
+def plan_sha(runs):
+    """fingerprint of a tier's plan (runs, configs, splits, groups): every slice of
+    a tier must share it"""
+    keys = ("run_id", "stage", "scenario", "config", "apps", "duration_s", "split", "group", "group_pos")
+    rows = sorted(({k: r[k] for k in keys} for r in runs), key=lambda x: x["run_id"])
+    return h(json.dumps(rows, sort_keys=True), 16)
+
+
 def slice_units(runs, i, n):
     """--slice i/n: units dealt round-robin in hash order, stratum by stratum
     (tunnel groups by (stage, mode, esp shape), single runs by (stage, scenario)),
@@ -298,3 +321,49 @@ def slice_units(runs, i, n):
                 keep.add(u)
             deal += 1
     return [r for r in runs if (r["group"] or r["run_id"]) in keep]
+
+
+def deal(runs, i, n):
+    """--slice i/n after p0 (the legacy tiers keep slice_units). units (tunnel
+    groups, single runs) are dealt stratum by stratum (stage, edge case), largest
+    units first, each to the least-loaded slice in estimated seconds, so the slices
+    finish together. among equally loaded slices a tunnel group goes where its
+    config, wire shape and mode are least represented, so no config is tied to one
+    machine. replay strata (external pcaps) are dealt round-robin last: whether
+    their pcaps exist never moves another unit. inside the slice the units run in
+    seeded random order (a group's runs together, in group order), so run type is
+    not tied to time of capture; "order" is each run's position."""
+    if not runs:
+        return []
+    us = units(runs)
+    strata = {}
+    for uid, rs in us.items():
+        strata.setdefault((rs[0]["stage"], rs[0]["edge_case"] or ""), []).append(uid)
+    ucost = {u: sum(cost(r) for r in rs) for u, rs in us.items()}
+    replay = sorted(k for k in strata if us[strata[k][0]][0]["replayed"])
+    main = sorted((k for k in strata if k not in replay), key=lambda k: (-max(ucost[u] for u in strata[k]), k))
+    load, got = [0] * n, [[] for _ in range(n)]
+
+    def akey(u):
+        c = us[u][0]["config"]
+        return (c["mode"], c.get("esp_shape", ""), c["outer_family"], bool(c["encap"]))
+
+    def clash(u, s):
+        if not us[u][0]["group"]:
+            return (0, 0, 0)
+        c, have = akey(u), [akey(v) for v in got[s] if us[v][0]["group"]]
+        return (sum(x == c for x in have), sum(x[1] == c[1] for x in have), sum(x[0] == c[0] for x in have))
+
+    for k in main:
+        for u in sorted(strata[k], key=lambda u: h(u, 16)):
+            s = min(range(n), key=lambda s: (load[s], clash(u, s), s))
+            load[s] += ucost[u]
+            got[s].append(u)
+    for j, u in enumerate(u for k in replay for u in sorted(strata[k], key=lambda u: h(u, 16))):
+        got[j % n].append(u)
+    mine = sorted(got[i - 1])
+    random.Random(f"{matrix['seeds'][runs[0]['tier']]}:order:{i}/{n}").shuffle(mine)
+    out = []
+    for u in mine:
+        out += [{**r, "order": len(out) + j} for j, r in enumerate(us[u])]
+    return out

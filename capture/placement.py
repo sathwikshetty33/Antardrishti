@@ -6,14 +6,20 @@ state file under a lock and each claims its next run with choose():
   - heavy runs (video, web, bulk): at most one at a time on the machine
   - voip never runs next to a heavy run
   - no run starts while the machine's cpu is above max_busy
+  - a timed run (timing-sensitive stage, plan.timed) starts only on an idle
+    machine, and nothing starts next to it
   - a tunnel group stays on the lab that holds its tunnel; its first run
     (before_tunnel) goes first. a lab that has nothing runnable in its group may
     take other work and release the group (its tunnel is then rebuilt, uncaptured,
     by whichever lab continues it: the remaining runs are mid_stream anyway)
+  - after p0 every run carries its slice position ("order", plan.deal): runs
+    start in that order; untimed runs may share lanes, a timed one waits for an
+    idle machine and holds back the runs after it
 """
 import fcntl
 import json
 import os
+import platform
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -60,8 +66,10 @@ def cpu_busy(window=2.0):
     return round(100.0 * (1 - (i2 - i1) / max(1, t2 - t1)), 1)
 
 
-def allowed(cls, active):
+def allowed(cls, active, timed=False):
     """may a run of class cls start next to the active runs of the other labs?"""
+    if active and (timed or any(a.get("timed") for a in active)):
+        return False
     kinds = {a["cls"] for a in active}
     if cls == "heavy":
         return "heavy" not in kinds and "voip" not in kinds
@@ -101,7 +109,16 @@ def pick(runs, lab, state, done):
     held = state.get("held", {})
     mine = next((u for u, k in held.items() if k == lab), None)
     others = {u for u, k in held.items() if k != lab}
-    cand = [(own, r) for own, r in eligible(runs, mine, others, done, active_ids) if allowed(r["cls"], active)]
+    el = eligible(runs, mine, others, done, active_ids)
+    if any("order" in r for _, r in el):
+        el.sort(key=lambda x: x[1].get("order", 10 ** 9))
+        nxt = el[0][1]
+        if allowed(nxt["cls"], active, nxt.get("timed")):
+            return nxt
+        if nxt.get("timed"):
+            return None
+        return next((r for _, r in el if not r.get("timed") and allowed(r["cls"], active)), None)
+    cand = [(own, r) for own, r in el if allowed(r["cls"], active, r.get("timed"))]
     if not cand:
         return None
     rank = {"heavy": 0, "voip": 1, "light": 2}
@@ -123,7 +140,8 @@ def claim(runs, lab, done, cost_fn=None):
         r = pick(runs, lab, s, done)
         if r is None:
             return None
-        s.setdefault("active", {})[str(lab)] = {"run_id": r["run_id"], "cls": r["cls"], "since": time.time()}
+        s.setdefault("active", {})[str(lab)] = {"run_id": r["run_id"], "cls": r["cls"], "timed": r.get("timed", False),
+                                                "since": time.time()}
         held = s.setdefault("held", {})
         for u, k in list(held.items()):
             if k == lab:
@@ -191,7 +209,7 @@ def simulate(runs, labs, cost_fn, reuse_cost=5):
             if r["group"]:
                 held[r["group"]] = k
             tunnel[k] = r["group"]
-            active[str(k)] = {"run_id": r["run_id"], "cls": r["cls"], "end": t + d}
+            active[str(k)] = {"run_id": r["run_id"], "cls": r["cls"], "timed": r.get("timed", False), "end": t + d}
             free_at[k] = t + d
             busy[k] += d
             started = True
@@ -208,6 +226,21 @@ def simulate(runs, labs, cost_fn, reuse_cost=5):
     return max(free_at.values()), busy
 
 
+def cs_env(key):
+    """codespace identity. a batch started over ssh does not inherit it, so fall
+    back to the codespace's own env file (only the asked key, never its tokens)"""
+    if os.environ.get(key):
+        return os.environ[key]
+    try:
+        for line in open("/workspaces/.codespaces/shared/.env"):
+            k, _, v = line.strip().partition("=")
+            if k == key:
+                return v
+    except OSError:
+        pass
+    return ""
+
+
 def machine():
     mem = 0
     try:
@@ -219,7 +252,7 @@ def machine():
         model = next(l for l in open("/proc/cpuinfo") if l.startswith("model name")).split(":", 1)[1].strip()
     except Exception:
         pass
-    return {"env": "codespaces" if os.environ.get("CODESPACES") == "true" else "other",
-            "account": os.environ.get("GITHUB_USER", ""),
-            "cores": os.cpu_count(), "mem_gb": round(mem, 1), "cpu": model,
-            "codespace": os.environ.get("CODESPACE_NAME", ""), "machine_class": os.environ.get("ANTAR_MACHINE", "")}
+    return {"env": "codespaces" if cs_env("CODESPACES") == "true" else "other",
+            "account": cs_env("GITHUB_USER"), "codespace": cs_env("CODESPACE_NAME"),
+            "cores": os.cpu_count(), "mem_gb": round(mem, 1), "cpu": model, "kernel": platform.release(),
+            "machine_class": os.environ.get("ANTAR_MACHINE", "")}
