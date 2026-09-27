@@ -55,7 +55,8 @@ p0:
     scenario: cookie challenge
     duration_s: 30
     apps: [icmp]
-    b: {charon: {cookie_threshold: 1}}
+    config: {ike_proposal: "aes256-sha256-curve25519"}
+    b: {charon: {cookie_threshold: 1}, conn: {remote_addr: "%any"}}
     setup: [half_open_flood]
     expect: {established: true, notifies: [COOKIE], min_init_requests: 2}
 
@@ -78,7 +79,9 @@ p0:
     scenario: ike sa rekey
     duration_s: 70
     apps: [icmp]
-    config: {ike_rekey_s: 40}
+    # two rekeys (25 s, 50 s): after one rekey the new spis are only inside the
+    # encrypted payload; the second rekey runs on the new sa, so its spi shows on the wire
+    config: {ike_rekey_s: 25}
     expect: {established: true, exchanges: [CREATE_CHILD_SA], ike_spi_change: true}
 
   e10:
@@ -100,10 +103,18 @@ p0:
     scenario: forced nat-t
     duration_s: 60
     apps: [icmp]
+    # traffic for the first 25 s (esp-in-udp), then idle so keepalives are due
+    app_len_s: 25
     config: {encap: true}
+    # strongswan 5.9 sends nat-t keepalives only when it detects that the *local*
+    # host is behind nat (COND_NAT_HERE). encap = yes alone only fakes the nat-d
+    # payloads for the peer, and both sides log "remote host is behind NAT", so no
+    # keepalive is ever sent. gw_a therefore also sits behind a real source nat
+    # (its udp is snat-ed to 172.31.1.11 on its wan egress), as at a cpe.
+    setup: [snat_initiator]
     a: {charon: {keep_alive: 5}}
-    b: {charon: {keep_alive: 5}}
-    expect: {established: true, udp4500_esp: true, non_esp_marker: true, keepalives: true}
+    b: {charon: {keep_alive: 5}, conn: {remote_addr: "%any"}}
+    expect: {established: true, udp4500_esp: true, non_esp_marker: true, keepalives: true, nat_local: true}
 
   e13:
     scenario: ikev1 main mode

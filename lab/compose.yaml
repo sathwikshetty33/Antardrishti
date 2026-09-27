@@ -110,7 +110,49 @@ services:
     networks:
       wan_b: {ipv4_address: 172.31.2.20, ipv6_address: "fd00:b::20"}
 
+  # e18 only (profile multi): extra initiators toward gw_b. gw_c sits directly
+  # on wan_a; gw_d and gw_e share one masquerading nat box.
+  gw_c:
+    <<: *lab
+    image: antar/gw
+    container_name: antar_gw_c
+    hostname: gw-c
+    profiles: [multi]
+    networks:
+      wan_a: {ipv4_address: 172.31.1.30, ipv6_address: "fd00:a::30"}
+
+  nat_n:
+    <<: *lab
+    image: antar/router
+    container_name: antar_nat_n
+    hostname: nat-n
+    profiles: [multi]
+    networks:
+      wan_a: {ipv4_address: 172.31.1.40, ipv6_address: "fd00:a::40"}
+      nat_lan: {ipv4_address: 172.31.5.254}
+
+  gw_d:
+    <<: *lab
+    image: antar/gw
+    container_name: antar_gw_d
+    hostname: gw-d
+    profiles: [multi]
+    networks:
+      nat_lan: {ipv4_address: 172.31.5.10}
+
+  gw_e:
+    <<: *lab
+    image: antar/gw
+    container_name: antar_gw_e
+    hostname: gw-e
+    profiles: [multi]
+    networks:
+      nat_lan: {ipv4_address: 172.31.5.11}
+
 networks:
+  nat_lan:
+    internal: true
+    ipam: {config: [{subnet: 172.31.5.0/24}]}
   lan_a:
     internal: true
     enable_ipv6: true

@@ -10,6 +10,13 @@ charon {
 {% if cookie_threshold is defined %}
   cookie_threshold = {{ cookie_threshold }}
 {% endif %}
+{% if keep_alive is defined %}
+  keep_alive = {{ keep_alive }}s
+{% endif %}
+{% if aggressive_psk | default(false) %}
+  # e14 only: strongswan refuses aggressive mode with psk unless told otherwise
+  i_dont_care_about_security_and_use_aggressive_mode_psk = yes
+{% endif %}
   filelog {
     charon {
       path = /var/log/charon.log

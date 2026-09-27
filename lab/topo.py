@@ -52,32 +52,37 @@ def guard():
     as in the failure edge cases) must not leak inner traffic into outer captures.
     the router has no inner routes either, but tcpdump there sees ingress first."""
     for s_ in "ab":
-        g = c[f"gw_{s_}"]
-        dev = iface(g, gw[s_]["v4"])
-        for ipt, icmp in (("iptables", "-p icmp --icmp-type fragmentation-needed"),
-                          ("ip6tables", "")):
-            dx(g, f"{ipt} -N wanguard 2>/dev/null; {ipt} -F wanguard")
-            rules = ["-p esp -j RETURN", "-p ah -j RETURN",
-                     "-p udp -m multiport --ports 500,4500 -j RETURN",
-                     "-m policy --dir out --pol ipsec -j RETURN"]
-            if ipt == "iptables":
-                rules.append(f"{icmp} -j RETURN")
-            else:
-                rules += [f"-p ipv6-icmp --icmpv6-type {t} -j RETURN"
-                          for t in ("packet-too-big", "133", "134", "135", "136")]
-            rules.append("-j DROP")
-            for r in rules:
-                dx(g, f"{ipt} -A wanguard {r}")
-            for ch in ("OUTPUT", "FORWARD"):
-                dx(g, f"{ipt} -D {ch} -o {dev} -j wanguard 2>/dev/null; {ipt} -I {ch} -o {dev} -j wanguard")
+        wan_guard(c[f"gw_{s_}"], gw[s_]["v4"])
+
+
+def wan_guard(g, wan_ip, v6=True):
+    dev = iface(g, wan_ip)
+    fams = (("iptables", "v4"), ("ip6tables", "v6")) if v6 else (("iptables", "v4"),)
+    for ipt, fam in fams:
+        dx(g, f"{ipt} -N wanguard 2>/dev/null; {ipt} -F wanguard")
+        rules = ["-p esp -j RETURN", "-p ah -j RETURN",
+                 "-p udp -m multiport --ports 500,4500 -j RETURN",
+                 "-m policy --dir out --pol ipsec -j RETURN"]
+        if fam == "v4":
+            rules.append("-p icmp --icmp-type fragmentation-needed -j RETURN")
+        else:
+            rules += [f"-p ipv6-icmp --icmpv6-type {t} -j RETURN"
+                      for t in ("packet-too-big", "133", "134", "135", "136")]
+        rules.append("-j DROP")
+        for r in rules:
+            dx(g, f"{ipt} -A wanguard {r}")
+        for ch in ("OUTPUT", "FORWARD"):
+            dx(g, f"{ipt} -D {ch} -o {dev} -j wanguard 2>/dev/null; {ipt} -I {ch} -o {dev} -j wanguard")
 
 
 def nat(on):
-    """gw_b masquerades tunnelled lan_a traffic to the internet (realism tier)"""
-    dx(c["gw_b"], "iptables -t nat -F POSTROUTING")
+    """gw_b masquerades tunnelled lan_a traffic to the internet (realism tier).
+    touches only its own rule: docker's embedded dns lives in the same nat table"""
+    _, dev = dx(c["gw_b"], "ip -o route show default | awk '{print $5}'")
+    rule = f"POSTROUTING -s {lan['a']['v4']} -o {dev.split()[0]} -j MASQUERADE"
+    dx(c["gw_b"], f"while iptables -t nat -D {rule} 2>/dev/null; do :; done")
     if on:
-        _, dev = dx(c["gw_b"], "ip -o route show default | awk '{print $5}'")
-        dx(c["gw_b"], f"iptables -t nat -A POSTROUTING -s {lan['a']['v4']} -o {dev.split()[0]} -j MASQUERADE")
+        dx(c["gw_b"], f"iptables -t nat -A {rule}")
 
 
 def iface(name, ip):
@@ -194,15 +199,21 @@ def conn_ctx(cfg, side, over=None):
             "local_cert": f"gw_{me}-{kt}.pem",
             "local_id": f"gw-{me}.lab", "remote_id": f"gw-{peer}.lab",
             "children": [child]}
-    conn.update(over.get("conn", {}))
+    conn.update({k: v for k, v in over.get("conn", {}).items() if k != "proposals"})
+    if "proposals" in over.get("conn", {}):
+        conn["ike_proposal"] = over["conn"]["proposals"]
     for i, ch in enumerate(over.get("children", [])):
         if i < len(conn["children"]):
             conn["children"][i] = {**conn["children"][i], **ch}
         else:
             conn["children"].append({**child, **ch})
-    key = over.get("psk", {}).get(me, psk)
+    key = over.get("psk", psk) if isinstance(over.get("psk"), str) else psk
     secrets = [{"id1": "gw-a.lab", "id2": "gw-b.lab", "psk": key}] if auth == "psk" else []
-    return {"conns": [conn], "secrets": secrets}
+    conns = [conn]
+    for x in over.get("extra_conns", []):
+        conns.append(x)
+        secrets.append({"id1": x["local_id"], "id2": x["remote_id"], "psk": psk})
+    return {"conns": conns, "secrets": secrets}
 
 
 def charon_start(name, sconf):
@@ -218,13 +229,16 @@ def charon_start(name, sconf):
 
 
 def deploy(cfg, over=None, backend="kernel"):
-    """render + load swanctl on both gateways. returns rendered confs {a, b}"""
+    """render + load swanctl on both gateways. over = {"a": {...}, "b": {...}}
+    with per-side conn / children / psk / charon / extra_conns overrides.
+    returns rendered confs {a, b}"""
     over = over or {}
     out = {}
     for s in "ab":
         g = c[f"gw_{s}"]
-        sconf = render("strongswan.conf.j2", backend=backend, **over.get("charon", {}).get(s, {}))
-        swan = render("swanctl.conf.j2", **conn_ctx(cfg, s, over))
+        o = over.get(s, {})
+        sconf = render("strongswan.conf.j2", backend=backend, **o.get("charon", {}))
+        swan = render("swanctl.conf.j2", **conn_ctx(cfg, s, o))
         put(g, "/etc/swanctl/swanctl.conf", swan)
         charon_start(g, sconf)
         dx(g, "swanctl --load-all --noprompt")
@@ -275,3 +289,85 @@ def endpoints(cfg):
     if cfg["mode"] == "transport":
         return c["cli_gw"], c["svc_gw"], gw["b"][cfg["outer_family"]]
     return c["host_a"], c["host_b"], host["b"][cfg["inner_family"]]
+
+
+# e18: extra initiators toward gw_b. gw_c is direct, gw_d / gw_e sit behind nat_n
+multi = {"gw_c": {"ip": "172.31.1.30", "via": "172.31.1.254", "encap": False},
+         "gw_d": {"ip": "172.31.5.10", "via": "172.31.5.254", "encap": True},
+         "gw_e": {"ip": "172.31.5.11", "via": "172.31.5.254", "encap": True}}
+
+
+def multi_conn(name, side):
+    """conn dict for an extra initiator (side 'i') or its responder twin on gw_b ('r')"""
+    x = name[-1]
+    child = {"name": "t", "mode": "tunnel", "local_ts": "dynamic", "remote_ts": "dynamic",
+             "ah_proposals": None, "esp_proposal": "aes128gcm16-ecp256", "child_rekey_s": 3600,
+             "replay_window": 32, "start_action": "none"}
+    base_ = {"ike_version": 2, "ike_proposal": "aes256-sha256-ecp256", "ike_rekey_s": 14400,
+             "dpd_delay_s": 0, "aggressive": False, "fragmentation": "yes", "auth": "psk",
+             "local_cert": "", "children": [child]}
+    if side == "i":
+        return {**base_, "name": "lab", "local_addr": multi[name]["ip"], "remote_addr": gw["b"]["v4"],
+                "encap": multi[name]["encap"], "local_id": f"gw-{x}.lab", "remote_id": "gw-b.lab"}
+    # behind nat the initiator proposes its private address; on the responder
+    # "dynamic" would mean the nat's public one (ts unacceptable), so accept the lan
+    rchild = {**child, "remote_ts": "172.31.5.0/24"} if multi[name]["encap"] else child
+    return {**base_, "name": f"peer_{x}", "local_addr": gw["b"]["v4"], "remote_addr": "%any",
+            "encap": multi[name]["encap"], "local_id": "gw-b.lab", "remote_id": f"gw-{x}.lab",
+            "children": [rchild]}
+
+
+def multi_up():
+    sh(f"{compose} --profile multi up -d gw_c nat_n gw_d gw_e", timeout=600)
+    time.sleep(1)
+    n = "antar_nat_n"
+    dx(n, "ip route replace 172.31.2.0/24 via 172.31.1.254")
+    _, dev = dx(n, "ip -o addr show | awk '$4 ~ /^172.31.1.40\\// {print $2}'")
+    dx(n, f"iptables -t nat -F POSTROUTING; iptables -t nat -A POSTROUTING -s 172.31.5.0/24 -o {dev.split()[0]} -j MASQUERADE")
+    for g, m in multi.items():
+        dx(f"antar_{g}", f"ip route replace 172.31.2.0/24 via {m['via']}")
+    route(c["gw_b"], "172.31.5.0/24", rtr["b"]["v4"])
+    return [f"gw-{g[-1]}.lab" for g in multi]
+
+
+def multi_start(duration=50):
+    """charon + conn on every extra initiator, initiate all, then ping gw_b through
+    each tunnel for duration seconds. returns {name: initiate rc}"""
+    res = {}
+    for g in multi:
+        name = f"antar_{g}"
+        swan = render("swanctl.conf.j2", conns=[multi_conn(g, "i")],
+                      secrets=[{"id1": f"gw-{g[-1]}.lab", "id2": "gw-b.lab", "psk": psk}])
+        put(name, "/etc/swanctl/swanctl.conf", swan)
+        charon_start(name, render("strongswan.conf.j2", backend="kernel"))
+        dx(name, "swanctl --load-all --noprompt")
+    for g in multi:
+        name = f"antar_{g}"
+        wan_guard(name, multi[g]["ip"], v6=False)
+        res[g] = dx(name, "swanctl --initiate --child t --timeout 20", check=False, timeout=40)[0]
+        # light traffic per tunnel, so each one shows esp for tunnel grouping
+        dx(name, f"ping -q -i 0.5 -w {duration} {gw['b']['v4']} >/dev/null 2>&1", detach=True)
+    return res
+
+
+def multi_down():
+    sh(f"{compose} --profile multi rm -sf gw_c nat_n gw_d gw_e", check=False, timeout=300)
+
+
+def versions():
+    """what actually ran: images are rebuilt after every codespace restart, so
+    package versions can drift within a dataset. recorded in every run's meta"""
+    q = {"strongswan": (c["gw_a"], "swanctl --version | head -1"),
+         "kernel_ipsec": (c["gw_a"], "uname -r"),
+         "nginx": (c["host_b"], "nginx -v 2>&1"),
+         "asterisk": (c["host_b"], "asterisk -V"),
+         "postfix": (c["host_b"], "postconf -h mail_version"),
+         "dovecot": (c["host_b"], "dovecot --version"),
+         "prosody": (c["host_b"], "prosodyctl about 2>/dev/null | grep -m1 -i '^prosody'"),
+         "chrome": (c["host_a"], "google-chrome --version"),
+         "baresip": (c["host_a"], "baresip -h 2>&1 | head -1"),
+         "tcpdump": (c["router"], "tcpdump --version 2>&1 | head -1")}
+    out = {k: dx(n, cmd, check=False)[1].strip()[:80] for k, (n, cmd) in q.items()}
+    for n in ("gw_a", "router", "host_a", "host_b", "noise_a"):
+        out[f"image_{n}"] = sh(f"docker inspect -f '{{{{.Image}}}}' {c[n]}", check=False)[1][:19]
+    return out

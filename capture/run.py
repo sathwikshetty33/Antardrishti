@@ -1,38 +1,695 @@
 """orchestrator: plan -> run -> validate -> record.
 
-usage: python3 capture/run.py --tier p0 [--scenario voip ...] [--resume]
-                              [--fill-gaps] [--dry-run] [--limit N]
+usage: python3 capture/run.py --tier p0 [--scenario voip e01 ...] [--resume]
+                              [--fill-gaps] [--dry-run] [--limit N] [--yes]
+
+resumable: runs whose latest manifest entry is ok are always skipped, so a
+killed batch (idle timeout, ctrl-c) continues where it stopped. batches over
+2 hours need --yes (ask the user first).
 """
 import argparse
+import hashlib
+import importlib
 import json
 import os
+import platform
+import random
+import shutil
+import subprocess
 import sys
+import threading
+import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+here = Path(__file__).resolve().parent
+sys.path[:0] = [str(here), str(here.parent / "lab"), str(here.parent / "gen")]
+import common
+import observe
 import plan
+import topo
+from lab import dx, sh
 
 root = plan.root
+raw = root / "dataset" / "raw"
 manifest = root / "dataset" / "manifest.jsonl"
+env = json.loads((root / "dataset" / "env.json").read_text()) if (root / "dataset" / "env.json").exists() else {}
+backend = env.get("ipsec_backend", "kernel")
+r_ = topo.c["router"]
+esp_min = 100          # traffic runs below this many esp packets fail validation
+snat_ip = "172.31.1.11"  # e12: gw_a's udp leaves through a source nat to this address
+attempts = 3           # first try + 2 retries
 
 
-def done_ids():
-    """run_ids whose latest manifest entry is ok"""
-    last = {}
+logfile = None   # dataset/raw/_logs/<tier>-<stamp>.log: survives codespace restarts, unlike /tmp
+lab_versions = {}  # package versions + image ids of this batch (topo.versions)
+
+
+def log(*a):
+    line = " ".join([time.strftime("%H:%M:%S"), *map(str, a)])
+    print(line, flush=True)
+    if logfile:
+        with open(logfile, "a") as f:
+            f.write(line + "\n")
+
+
+# ---------------------------------------------------------------- manifest
+
+def history():
+    last, tries = {}, Counter()
     if manifest.exists():
         for line in manifest.read_text().splitlines():
             if line.strip():
                 m = json.loads(line)
                 last[m["run_id"]] = m["status"]
-    return {k for k, v in last.items() if v == "ok"}
+                tries[m["run_id"]] += 1
+    return last, tries
 
+
+slim = ("notes", "sha256")
+
+
+def record(meta):
+    """one line per attempt; the full record stays in raw/<run_id>/meta.json"""
+    m = {k: v for k, v in meta.items() if k not in slim}
+    m["observed"] = {k: v for k, v in (meta.get("observed") or {}).items()
+                     if k not in ("errors", "proposals", "esp_first_seq", "replay_counter", "spis", "ike_spis")}
+    with open(manifest, "a") as f:
+        f.write(json.dumps(m, sort_keys=True, default=list) + "\n")
+
+
+# ---------------------------------------------------------------- captures
+
+def cap_start(run, inner_on):
+    """outer + ike on the router, inner on host_a (tunnel) or nflog on gw_a (transport)"""
+    dx(r_, "pkill tcpdump; rm -rf /tmp/cap; mkdir -p /tmp/cap; true")
+    dx(r_, "tcpdump -i any -s 128 --time-stamp-precision nano -w /tmp/cap/outer.pcap >/dev/null 2>&1", detach=True)
+    # full packets for ike only: on 4500 keep what starts with the 4-byte non-esp
+    # marker, so esp-in-udp data never lands in this capture
+    bpf = ("udp port 500 or (ip and udp port 4500 and udp[8:4] = 0) or "
+           "(ip6 and udp port 4500 and ip6[48:4] = 0)")
+    dx(r_, f"tcpdump -i any -s 0 --time-stamp-precision nano -w /tmp/cap/ike_full.pcap '{bpf}' >/dev/null 2>&1", detach=True)
+    if inner_on:
+        n, cmd = inner_cmd(run)
+        dx(n, "pkill tcpdump; rm -rf /tmp/cap; mkdir -p /tmp/cap; true")
+        dx(n, cmd, detach=True)
+    time.sleep(1)
+    # fail fast: a capture that did not start must not look like "0 packets"
+    _, out = dx(r_, "pgrep -c -x tcpdump", check=False)
+    if out.strip() != "2":
+        raise RuntimeError(f"router captures not running ({out.strip()} tcpdump)")
+    if inner_on and dx(n, "pgrep -x tcpdump", check=False)[0] != 0:
+        raise RuntimeError(f"inner capture on {n} did not start")
+    return time.time()
+
+
+def inner_cmd(run):
+    # nflog cannot do nanosecond time stamps: transport-mode inner is microsecond
+    if run["config"]["mode"] == "transport":
+        return topo.c["gw_a"], "tcpdump -i nflog:7 -s 0 -w /tmp/cap/inner.pcap >/dev/null 2>&1"
+    return topo.c["host_a"], "tcpdump -i eth0 -s 96 --time-stamp-precision nano -w /tmp/cap/inner.pcap not arp >/dev/null 2>&1"
+
+
+def cap_stop(run, d):
+    n, _ = inner_cmd(run)
+    for x in (r_, n):
+        dx(x, "pkill -INT tcpdump; sleep 1; pkill tcpdump; true", check=False)
+    sh(f"docker cp {r_}:/tmp/cap/outer.pcap {d}/outer.pcap")
+    sh(f"docker cp {r_}:/tmp/cap/ike_full.pcap {d}/ike_full.pcap")
+    if dx(n, "test -f /tmp/cap/inner.pcap", check=False)[0] == 0:
+        sh(f"docker cp {n}:/tmp/cap/inner.pcap {d}/inner.pcap")
+    else:
+        sh(f": > {d}/inner.pcap")
+    # ike.pcap keeps ike only (esp-in-udp data would make it large)
+    sh(f"tshark -r {d}/ike_full.pcap -Y isakmp -w {d}/ike.pcap -F pcap", check=False, timeout=600)
+    if not (d / "ike.pcap").exists():
+        shutil.copy(d / "ike_full.pcap", d / "ike.pcap")
+    (d / "ike_full.pcap").unlink()
+
+
+def xfrm_snap(d, tag):
+    for s in "ab":
+        _, out = dx(topo.c[f"gw_{s}"], "ip -s xfrm state; echo; ip xfrm policy", check=False)
+        with open(d / f"xfrm_{s}.txt", "a") as f:
+            f.write(f"== {tag} {time.time():.3f}\n{out}\n")
+
+
+# ---------------------------------------------------------------- lab state
+
+def reset(run):
+    """a clean lab between runs: no ipsec, no netem, no edge rules, no stray tools"""
+    topo.stop_ipsec()
+    topo.netem(None)
+    topo.nflog(False)
+    topo.nat(False)
+    dx(r_, "nft delete table inet edge 2>/dev/null; pkill tcpdump; pkill tcpreplay; true", check=False)
+    for ipt in ("iptables", "ip6tables"):
+        dx(topo.c["gw_b"], f"while {ipt} -D OUTPUT -p udp -m multiport --sports 500,4500 -j DROP 2>/dev/null; do :; done", check=False)
+    g = topo.c["gw_a"]
+    dev = topo.iface(g, topo.gw["a"]["v4"])
+    dx(g, f"while iptables -t nat -D POSTROUTING -o {dev} -s {topo.gw['a']['v4']} -p udp -j SNAT --to-source {snat_ip} 2>/dev/null; do :; done; "
+          f"ip addr del {snat_ip}/24 dev {dev} 2>/dev/null; conntrack -F 2>/dev/null; true", check=False)
+    dx(topo.c["noise_a"], "pkill -f [n]oise.py; true", check=False)
+    for n in ("host_a", "cli_gw", "host_b", "svc_gw"):
+        dx(topo.c[n], "pkill -f [p]ython3.-u./gen; pkill baresip; pkill -f [c]hrome; pkill tcpreplay; "
+                      "iptables -S INPUT | grep -- '-j DROP' | sed 's/^-A/-D/' | xargs -r -L1 iptables; true", check=False)
+    if run.get("edge_case") != "e18":
+        topo.multi_down()
+
+
+def edge_rules(rules):
+    txt = "\n".join(["add table inet edge", "add chain inet edge fwd_ { type filter hook forward priority -20; }"] +
+                    [f"add rule inet edge fwd_ {r}" for r in rules])
+    topo.put(r_, "/tmp/edge.nft", txt + "\n")
+    dx(r_, "nft -f /tmp/edge.nft")
+
+
+def pre_setup(run):
+    """edge actions that must be in place before the tunnel is initiated"""
+    st = run.get("setup", [])
+    notes = {}
+    if "drop_ike_from_responder" in st:
+        # at gw_b's egress, not on the router: the router's tcpdump sees ingress
+        # before any forward drop, and the wire must show a silent responder
+        for ipt in ("iptables", "ip6tables"):
+            dx(topo.c["gw_b"], f"{ipt} -I OUTPUT -p udp -m multiport --sports 500,4500 -j DROP")
+    if "drop_ike_auth" in st:
+        # exchange type is ike header byte 18 (+4 behind the non-esp marker on 4500)
+        edge_rules(["udp dport 500 @th,208,8 35 drop", "udp sport 500 @th,208,8 35 drop",
+                    "udp dport 4500 @th,240,8 35 drop", "udp sport 4500 @th,240,8 35 drop"])
+    if "loss20_during_setup" in st:
+        for dev in topo.rtr_ifaces():
+            dx(r_, f"tc qdisc replace dev {dev} root netem loss 20%")
+    if "extra_initiators" in st:
+        notes["extra_ids"] = topo.multi_up()
+    if "snat_initiator" in st:
+        g = topo.c["gw_a"]
+        dev = topo.iface(g, topo.gw["a"]["v4"])
+        dx(g, f"ip addr add {snat_ip}/24 dev {dev}")
+        dx(g, f"iptables -t nat -A POSTROUTING -o {dev} -s {topo.gw['a']['v4']} -p udp -j SNAT --to-source {snat_ip}")
+        # nat is decided on a flow's first packet: drop stale ike flows of earlier runs
+        dx(g, "conntrack -F 2>/dev/null; true")
+        notes["snat"] = snat_ip
+    return notes
+
+
+def half_open_flood(run):
+    fam = run["config"]["outer_family"]
+    _, out = dx(topo.c["noise_a"], f"python3 /ikeinit.py {topo.gw['b'][fam]} 3")
+    time.sleep(1)
+    return out
+
+
+def replay_esp(run, d):
+    """e26: grab 40 esp packets gw_a -> gw_b on the router and inject them again toward gw_b"""
+    dev = topo.iface(r_, topo.rtr["b"]["v4"])
+    src = topo.gw["a"][run["config"]["outer_family"]]
+    host = "ip6" if ":" in src else "ip"
+    dx(r_, f"timeout 10 tcpdump -i {dev} -c 40 -w /tmp/replay.pcap '{host} src {src} and esp' >/dev/null 2>&1; true", timeout=30)
+    rc, out = dx(r_, f"tcpreplay -q -i {dev} /tmp/replay.pcap", check=False)
+    return {"replayed_packets": 40, "rc": rc, "out": out[-200:]}
+
+
+# ---------------------------------------------------------------- apps
+
+def app_plan(run, rng, dur):
+    """[(app, offset_s, length_s)] - mixtures are staggered so a run holds pure and mixed segments"""
+    apps = [a for a in run["apps"]]
+    if run["stage"] == "mixtures" and len(apps) > 1:
+        rng.shuffle(apps)
+        out = []
+        for i, a in enumerate(apps):
+            s = 0 if i == 0 else rng.uniform(0, 0.35 * dur)
+            e = dur if i == 0 else rng.uniform(max(s + 20, 0.65 * dur), dur)
+            out.append((a, round(s, 1), round(max(10, min(e, dur) - s), 1)))
+        return out
+    return [(a, 0, dur) for a in apps]
+
+
+def module_for(app):
+    return {"icmp_big": "icmp", "chat": "chat"}.get(app, common.module(app))
+
+
+def run_app(app, seed, ctx, offset, length, out):
+    time.sleep(offset)
+    mod = importlib.import_module(module_for(app))
+    try:
+        if app == "icmp_big":
+            ev = mod.start(length, seed, ctx, big=True)
+        else:
+            ev = mod.start(length, seed, ctx)
+    except Exception as e:
+        ev = [{"app": app, "event": "app", "start": time.time(), "stop": time.time(), "rc": 1, "err": str(e)[:400]}]
+    for e in ev:
+        e["app"] = app if e.get("app") in (None, module_for(app), common.module(app)) else e["app"]
+    out.extend(ev)
+
+
+def start_apps(run, ctx, dur, rng):
+    evs, threads = [], []
+    for i, (app, off, length) in enumerate(app_plan(run, rng, dur)):
+        seed = (run["seed"] + 7919 * i) % 2**31
+        t = threading.Thread(target=run_app, args=(app, seed, ctx, off, length, evs), daemon=True)
+        t.start()
+        threads.append(t)
+    return evs, threads
+
+
+# ---------------------------------------------------------------- one run
+
+def execute(run, d):
+    cfg = run["config"]
+    rng = random.Random(run["seed"])
+    st = run.get("setup", [])
+    dur = run["duration_s"]
+    over = run.get("over") or {}
+    notes = {"timeline": []}
+
+    def mark(what, **kw):
+        notes["timeline"].append({"t": round(time.time(), 3), "what": what, **kw})
+
+    reset(run)
+    if "extra_initiators" in st:
+        over = json.loads(json.dumps(over))
+        over.setdefault("b", {})["extra_conns"] = [topo.multi_conn(g, "r") for g in topo.multi]
+    confs = topo.deploy(cfg, over, backend)
+    for s in "ab":
+        (d / f"swanctl_{s}.conf").write_text(confs[s])
+    if cfg.get("internet"):
+        topo.nat(True)
+    if run.get("netem") and run["netem"] != "lan":
+        topo.netem(plan.netems[run["netem"]])
+    notes.update(pre_setup(run))
+    if cfg["mode"] == "transport":
+        topo.nflog(True)
+    ctx = topo.gen_ctx(cfg, d)
+
+    delay = run.get("capture_delay_s", 0)
+    before = run.get("capture_start") == "before_tunnel"
+    init = {}
+
+    def initiate():
+        rc, out = topo.initiate(timeout=min(60, dur), check=False)
+        init.update(rc=rc, out=out[-600:], t=time.time())
+        mark("initiate_done", rc=rc)
+
+    t0 = None
+    if before:
+        t0 = cap_start(run, True)
+        mark("capture_start")
+        xfrm_snap(d, "start")
+    if "half_open_flood" in st:
+        notes["flood"] = half_open_flood(run)
+        mark("half_open_flood")
+    th = threading.Thread(target=initiate, daemon=True)
+    mark("initiate")
+    th.start()
+    th.join(timeout=25 if run.get("edge_case") else 40)
+    if "extra_initiators" in st:
+        notes["extra"] = topo.multi_start(max(10, dur - 15))
+        mark("extra_initiators")
+    if "loss20_during_setup" in st:
+        th.join(timeout=40)
+        topo.netem(None)
+        mark("loss_removed")
+    if not before:
+        # mid-stream: traffic runs for `delay` seconds before the capture starts
+        app_len = dur + delay - 2
+        evs, threads = start_apps(run, ctx, app_len, rng) if run["apps"] else ([], [])
+        noise_on(run)
+        time.sleep(delay)
+        t0 = cap_start(run, True)
+        mark("capture_start")
+        xfrm_snap(d, "start")
+    else:
+        app_len = max(5, dur - (time.time() - t0) - 2)
+        if run.get("app_len_s"):
+            app_len = min(app_len, run["app_len_s"])
+        noise_on(run)
+        evs, threads = start_apps(run, ctx, app_len, rng) if run["apps"] else ([], [])
+    mark("apps_start", apps=run["apps"], length=round(app_len, 1))
+    done = {}
+    while time.time() - t0 < dur:
+        el = time.time() - t0
+        if "terminate_at_35" in st and el >= 35 and "term" not in done:
+            done["term"] = dx(topo.c["gw_a"], "swanctl --terminate --ike lab --timeout 10", check=False)[0]
+            mark("terminate", rc=done["term"])
+        if "replay_esp_at_30" in st and el >= 30 and "replay" not in done:
+            done["replay"] = replay_esp(run, d)
+            mark("replay_esp")
+        time.sleep(0.5)
+    for t in threads:
+        t.join(timeout=60)
+    xfrm_snap(d, "end")
+    mark("capture_stop")
+    noise_off()
+    cap_stop(run, d)
+    for s in "ab":
+        _, lg = dx(topo.c[f"gw_{s}"], "cat /var/log/charon.log", check=False)
+        (d / f"charon_{s}.log").write_text(lg + "\n")
+    if "extra_initiators" in st:
+        for g in topo.multi:
+            _, lg = dx(f"antar_{g}", "cat /var/log/charon.log; echo; ip -s xfrm state; swanctl --list-sas", check=False)
+            (d / f"extra_{g}.txt").write_text(lg + "\n")
+    _, sas = dx(topo.c["gw_b"], "swanctl --list-sas", check=False)
+    notes["sas_b_end"] = sas[-3000:]
+    notes["initiate"] = init
+    notes["actions"] = done
+    sched = []
+    for e in sorted(evs, key=lambda e: e["start"]):
+        sched.append({**e, "start": round(e["start"] - t0, 3), "stop": round(e["stop"] - t0, 3)})
+    (d / "schedule.json").write_text(json.dumps({"capture_start_epoch": t0, "entries": sched,
+                                                 "timeline": [{**x, "t": round(x["t"] - t0, 3)} for x in notes["timeline"]]},
+                                                indent=1, default=list))
+    return t0, sched, notes
+
+
+def noise_on(run):
+    if run.get("noise"):
+        dx(topo.c["noise_a"], f"python3 /noise.py {run['seed']} both >/dev/null 2>&1", detach=True)
+
+
+def noise_off():
+    dx(topo.c["noise_a"], "pkill -f [n]oise.py; true", check=False)
+
+
+# ---------------------------------------------------------------- observe + validate
+
+def observed(run, d, t0, sched):
+    cfg = run["config"]
+    ca = observe.charon((d / "charon_a.log").read_text())
+    cb = observe.charon((d / "charon_b.log").read_text())
+    ik = observe.ike(d / "ike.pcap")
+    null = "null" in cfg["esp_proposal"]
+    es = observe.esp(d / "outer.pcap", null=null)
+    xa = observe.xfrm_state((d / "xfrm_a.txt").read_text())
+    xb = observe.xfrm_state((d / "xfrm_b.txt").read_text())
+    inner_n = observe.count(d / "inner.pcap")
+    o = {"established": ca["ike_established"] > 0 and ca["child_established"] > 0,
+         "ike_established": ca["ike_established"], "child_established": ca["child_established"],
+         "notifies": sorted(ik["notifies"] | ca["notifies"] | cb["notifies"]),
+         "wire_notifies": sorted(ik["notifies"]),
+         "exchanges": ik["exchanges"], "log_exchanges": ca["exchanges"],
+         "v1_exchanges": dict(ik["v1_exchanges"]),
+         "esp_packets": es["packets"], "ah_packets": es["ah_packets"], "ike_packets": ik["packets"],
+         "init_requests": ik["init_requests"], "init_responses": ik["init_responses"],
+         "auth_requests": ik["auth_requests"], "ike_retransmits": ik["retransmits"],
+         "responder_spi_zero": ik["responder_spi_zero"], "ike_fragments": ik["fragments"],
+         "ike_spis": sorted(ik["ispis"]), "cleartext_ids": sorted(ik["cleartext_ids"]),
+         "child_rekeys": ca["child_rekeys"], "ike_rekeys": ca["ike_rekeys"],
+         "pfs_in_rekey": ca["pfs_seen"], "proposals": ca["proposals"],
+         "spis": sorted(es["spis"]), "esp_first_seq": es["first_seq"],
+         "esp_udp4500": es["udp4500"], "ip_fragments": es["ip_fragments"],
+         "esp_duplicates": es["duplicates"],
+         "esp_plaintext": observe.null_plaintext(d / "outer.pcap") if null else 0,
+         "outer_families": sorted(es["outer_family"]), "inner_packets": inner_n,
+         "inner_families": sorted(observe.inner_family(d / "inner.pcap")) if inner_n else [],
+         "keepalives": observe.keepalives(d / "outer.pcap") if cfg["encap"] else 0,
+         "nonesp_marker": ik["nonesp_marker"], "deletes": ca["deletes"] + cb["deletes"],
+         "nat_local": ca["nat_local"], "nat_remote": ca["nat_remote"],
+         "xfrm_replay_window": sorted(xa["replay_window"] | xb["replay_window"]),
+         "xfrm_esn": xa["esn"] or xb["esn"],
+         "replay_counter": {k: v["replay"] for k, v in xb["sections"].items()},
+         "last_esp_s": round(es["last_time"] - t0, 3) if es["last_time"] else None,
+         "first_ike_s": round(ik["first"] - t0, 3) if ik["first"] else None,
+         "errors": ca["errors"][:5] + cb["errors"][:5]}
+    o["_esp_times"] = es["times"]
+    o["ike_sas"] = len(ik["ispis"])
+    o["ike_established_b"] = cb["ike_established"]
+    if "extra_initiators" in run.get("setup", []):
+        # tunnel-grouping ground truth: which spis belong to which initiator
+        o["tunnels"] = {}
+        for g in topo.multi:
+            f = d / f"extra_{g}.txt"
+            txt = f.read_text() if f.exists() else ""
+            ch = observe.charon(txt)
+            o["tunnels"][g] = {"established": ch["ike_established"] > 0 and ch["child_established"] > 0,
+                               "addr": topo.multi[g]["ip"], "behind_nat": topo.multi[g]["encap"],
+                               "esp_spis": sorted(observe.xfrm_state(txt)["spis"])}
+    o["nat_t_src_ports"] = len(ik["src_ports"].get("172.31.1.40", set()))
+    return o
+
+
+def esp_windows(times, t0, sched):
+    """2 s windows (from capture start) holding esp/ah, overall and per active app"""
+    ws = {int((t - t0) // 2) for t in times}
+    per = defaultdict(set)
+    for e in sched:
+        if e.get("event") == "app":
+            for w in ws:
+                if e["start"] <= w * 2 and (w + 1) * 2 <= e["stop"] + 0.001:
+                    per[e["app"]].add(w)
+    return {"esp": len(ws), **{k: len(v) for k, v in per.items()}}
+
+
+def check_expect(exp, o, run):
+    """edge expectations -> list of failed checks"""
+    bad = []
+
+    def need(c, what):
+        if not c:
+            bad.append(what)
+    for k, v in exp.items():
+        if k == "established":
+            need(o["established"] == v, f"established={o['established']}")
+        elif k == "esp":
+            need((o["esp_packets"] > 5) == v, f"esp_packets={o['esp_packets']}")
+        elif k == "exchanges":
+            need(all(x in o["exchanges"] for x in v), f"exchanges={o['exchanges']}")
+        elif k == "no_exchanges":
+            need(not any(x in o["exchanges"] for x in v), f"exchanges={o['exchanges']}")
+        elif k == "notifies":
+            need(all(x in o["notifies"] for x in v), f"notifies={o['notifies']}")
+        elif k == "min_init_requests":
+            need(o["init_requests"] >= v, f"init_requests={o['init_requests']}")
+        elif k == "min_auth_requests":
+            need(o["auth_requests"] >= v, f"auth_requests={o['auth_requests']}")
+        elif k == "init_response":
+            need((o["init_responses"] > 0) == v, f"init_responses={o['init_responses']}")
+        elif k == "responder_spi_zero":
+            need(o["responder_spi_zero"] is True and o["init_responses"] == 0, "responder answered")
+        elif k == "no_ike":
+            need(o["ike_packets"] == 0, f"ike_packets={o['ike_packets']}")
+        elif k == "esp_first_seq_min":
+            f = min(o["esp_first_seq"].values()) if o["esp_first_seq"] else 0
+            need(f >= v, f"first_seq={f}")
+        elif k == "spi_change":
+            need(len(o["spis"]) > 2, f"spis={len(o['spis'])}")
+        elif k == "ike_spi_change":
+            need(o["ike_sas"] >= 2 and o["ike_rekeys"] >= 1, f"ike_spis={o['ike_sas']} rekeys={o['ike_rekeys']}")
+        elif k == "delete":
+            need(o["deletes"] > 0, "no delete")
+        elif k == "esp_stops":
+            term = [x for x in run.get("_timeline", []) if x["what"] == "terminate"]
+            ts = term[0]["t"] if term else None
+            need(ts is not None and o["last_esp_s"] is not None and o["last_esp_s"] < ts + 3,
+                 f"last_esp={o['last_esp_s']} terminate={ts}")
+        elif k == "udp4500_esp":
+            need(o["esp_udp4500"] > 0, "no esp-in-udp")
+        elif k == "non_esp_marker":
+            need(o["nonesp_marker"], "no ike on 4500")
+        elif k == "keepalives":
+            need(o["keepalives"] > 0, "no nat-t keepalives")
+        elif k == "nat_local":
+            need(o["nat_local"] == v, f"nat_local={o['nat_local']}")
+        elif k == "v1_exchanges":
+            for x, n in v.items():
+                need(o["v1_exchanges"].get(x, 0) >= n, f"v1 {x}={o['v1_exchanges'].get(x, 0)}")
+        elif k == "cleartext_id":
+            need(len(o["cleartext_ids"]) > 0, "no cleartext id payload on the wire")
+        elif k == "init_transforms":
+            p = " ".join(o["proposals"])
+            need(all(x in p for x in v), f"proposals={o['proposals'][:2]}")
+        elif k == "esp_plaintext":
+            need(o["esp_plaintext"] > 0, "esp payload not readable")
+        elif k == "ike_retransmits":
+            need(o["ike_retransmits"] > 0, "no retransmits")
+        elif k == "outcome_recorded":
+            pass
+        elif k == "min_ike_sas":
+            # established on the responder, not merely attempted on the wire
+            est = [g for g, t in (o.get("tunnels") or {}).items() if t["established"]]
+            need(o["ike_established_b"] >= v and len(est) == len(o.get("tunnels") or {}) and o["ike_sas"] >= v,
+                 f"established on gw_b={o['ike_established_b']} extra up={est} wire spis={o['ike_sas']}")
+        elif k == "nat_t_ports":
+            need(o["nat_t_src_ports"] >= v, f"nat_t_src_ports={o['nat_t_src_ports']}")
+        elif k == "ah":
+            need(o["ah_packets"] > 5, f"ah_packets={o['ah_packets']}")
+        elif k == "xfrm_replay_window":
+            need(o["xfrm_replay_window"] == [v], f"replay_window={o['xfrm_replay_window']}")
+        elif k == "xfrm_esn":
+            need(o["xfrm_esn"], "esn not set")
+        elif k == "ike_fragments":
+            need(o["ike_fragments"], "no ike fragments")
+        elif k == "min_child_sas":
+            need(o["child_established"] >= v, f"child_sas={o['child_established']}")
+        elif k == "min_esp_spis":
+            need(len(o["spis"]) >= v, f"spis={len(o['spis'])}")
+        elif k == "families_differ":
+            need(o["outer_families"] and o["inner_families"] and o["outer_families"] != o["inner_families"],
+                 f"outer={o['outer_families']} inner={o['inner_families']}")
+        elif k == "ip_fragments":
+            need(o["ip_fragments"] > 0, "no ip fragments")
+        elif k == "duplicate_seq":
+            need(o["esp_duplicates"] > 0, "no duplicate seq")
+        elif k == "replay_counter_rises":
+            rc = list(o["replay_counter"].values())
+            need(len(rc) >= 2 and rc[-1] > rc[0], f"replay_counter={o['replay_counter']}")
+        else:
+            bad.append(f"unknown check {k}")
+    return bad
+
+
+def expected(run):
+    if run.get("edge_case"):
+        return run["expect"]
+    ex = ["IKE_SA_INIT", "IKE_AUTH"] if run.get("capture_start") == "before_tunnel" else []
+    if run["stage"] == "handshake":
+        ex.append("CREATE_CHILD_SA")
+    return {"esp": True, "ike_exchanges": ex}
+
+
+def validate(run, o, sched):
+    """-> (status, reasons)"""
+    why = []
+    apps = [e for e in sched if e.get("event") == "app"]
+    for e in apps:
+        if e.get("rc") not in (0, None):
+            why.append(f"generator {e['app']} rc={e['rc']} {e.get('err', '')[-160:]}")
+    if run.get("edge_case"):
+        if o["inner_packets"] == 0 and run["expect"].get("esp") and run["apps"]:
+            why.append("inner capture empty")
+        bad = check_expect(run["expect"], o, run)
+        if why:
+            return "failed", why
+        return ("mismatch", bad) if bad else ("ok", [])
+    if not o["established"]:
+        why.append("tunnel not established")
+    ex = expected(run)["ike_exchanges"]
+    miss = [x for x in ex if x not in o["exchanges"]]
+    if miss:
+        why.append(f"missing exchanges {miss}")
+    if o["esp_packets"] < esp_min:
+        why.append(f"esp_packets={o['esp_packets']} < {esp_min}")
+    if o["inner_packets"] < 10:
+        why.append(f"inner capture has {o['inner_packets']} packets")
+    if run["stage"] == "handshake" and o["child_rekeys"] < 1:
+        why.append("no child rekey observed")
+    if run.get("replayed") and not any(e.get("event") == "replay" for e in sched):
+        why.append("replay did not run")
+    return ("failed", why) if why else ("ok", [])
+
+
+# ---------------------------------------------------------------- record
+
+def finish(d):
+    """compress captures (after the run, never during) and checksum everything"""
+    for f in ("outer.pcap", "ike.pcap", "inner.pcap"):
+        p = d / f
+        if p.exists():
+            sh(f"zstd -q -f --rm -T0 -10 {p}", timeout=1800)
+    sums = {}
+    for p in sorted(d.iterdir()):
+        if p.is_file() and p.name != "meta.json":
+            sums[p.name] = hashlib.sha256(p.read_bytes()).hexdigest()
+    return sums
+
+
+def one(run, attempt):
+    d = raw / run["run_id"]
+    if d.exists():
+        shutil.rmtree(d)
+    d.mkdir(parents=True)
+    t_start = time.time()
+    status, why, o, notes, sched, t0 = "failed", [], {}, {}, [], None
+    try:
+        t0, sched, notes = execute(run, d)
+        run["_timeline"] = [{**x, "t": round(x["t"] - t0, 3)} for x in notes["timeline"]]
+        o = observed(run, d, t0, sched)
+        o["windows_2s"] = esp_windows(o.pop("_esp_times"), t0, sched)
+        status, why = validate(run, o, sched)
+    except Exception as e:
+        why = [f"exception: {str(e).strip()[-600:]}"]
+    sums = finish(d)
+    meta = {k: v for k, v in run.items() if not k.startswith("_") and k not in ("over", "expect", "setup")}
+    meta.update({"expected": expected(run), "observed": o, "status": status, "reasons": why,
+                 "attempt": attempt, "edge_setup": run.get("setup", []), "overrides": run.get("over") or {},
+                 "capture_start_epoch": t0, "wall_s": round(time.time() - t_start, 1),
+                 "ipsec_backend": backend,
+                 "strongswan_version": lab_versions.get("strongswan") or env.get("strongswan_version", ""),
+                 "lab": lab_versions,
+                 "kernel": platform.release(), "netem_available": env.get("netem", True),
+                 "noise": run.get("noise", False), "sha256": sums, "notes": {k: v for k, v in notes.items() if k != "timeline"},
+                 "bytes": sum(p.stat().st_size for p in d.iterdir() if p.is_file()),
+                 "ts_precision": {"outer": "ns", "ike": "ns",
+                                  "inner": "us" if run["config"]["mode"] == "transport" else "ns"},
+                 "inner_capture": "nflog on gw_a (policy match, both directions)" if run["config"]["mode"] == "transport"
+                 else "host_a eth0"})
+    (d / "meta.json").write_text(json.dumps(meta, indent=1, sort_keys=True, default=list))
+    record(meta)
+    if status != "ok":
+        keep = raw / "_attempts" / f"{run['run_id']}-a{attempt}"
+        keep.parent.mkdir(exist_ok=True)
+        if keep.exists():
+            shutil.rmtree(keep)
+        shutil.move(str(d), keep)
+    return status, why
+
+
+# ---------------------------------------------------------------- batch
 
 def select(args):
     runs = plan.build(args.tier)
     if args.scenario:
         runs = [r for r in runs if r["scenario"] in args.scenario or r["stage"] in args.scenario]
+    if args.rep:
+        runs = [r for r in runs if r["rep"] in args.rep]
+    if args.ids:
+        runs = [r for r in runs if r["run_id"] in args.ids]
     return runs
+
+
+def gaps(runs, last):
+    """edge cases short of their ok reps (mismatches are kept but not counted)
+    get new reps after the highest rep ever attempted"""
+    extra = []
+    tiers = {r["tier"] for r in runs if r.get("edge_case")}
+    for tier in tiers:
+        seed = plan.matrix["seeds"][tier]
+        level = [st for st in plan.matrix["tiers"][tier] if st["stage"] == "edge"][0]
+        for eid, e in plan.edges[level["level"]].items():
+            if not any(r.get("edge_case") == eid for r in runs):
+                continue
+            att = {rid: st for rid, st in last.items() if rid.startswith(f"{tier}-{eid}-")}
+            ok = sum(st == "ok" for st in att.values())
+            pending = [r for r in runs if r.get("edge_case") == eid and r["run_id"] not in att]
+            short = level["reps"] - ok - len(pending)
+            top = max([int(rid.rsplit("-r", 1)[1]) for rid in att] + [level["reps"]])
+            for i in range(max(0, short)):
+                extra.append(plan.edge_run(tier, eid, e, top + 1 + i, seed))
+    for r in extra:
+        r["split"] = "train"
+    by = defaultdict(list)
+    for r in extra:
+        by[r["edge_case"]].append(r)
+    # keep every edge case represented in test: a replacement rep inherits test
+    # when no ok test run exists for it yet
+    for eid, rs in by.items():
+        have = any(st == "ok" and m == "test" for rid, (st, m) in splits(last).items() if f"-{eid}-" in rid)
+        if not have:
+            rs[0]["split"] = "test"
+    return extra
+
+
+def splits(last):
+    """run_id -> (status, split) from the manifest"""
+    out = {}
+    if manifest.exists():
+        for line in manifest.read_text().splitlines():
+            if line.strip():
+                m = json.loads(line)
+                out[m["run_id"]] = (m["status"], m.get("split"))
+    return out
 
 
 def hms(s):
@@ -63,31 +720,100 @@ def dry_run(runs, todo):
     print(f"\nsplit: {dict(split)}  netem (non-edge): {dict(nm)}  mid_stream: {mid}")
     print(f"estimate: {hms(total)} wall clock on this {cores}-core machine = "
           f"{total / 3600 * cores:.1f} core-hours (free quota: 120/month)")
+    gb, n = storage(runs, todo)
+    if n:
+        print(f"storage estimate: {gb:.1f} GB compressed for the remaining runs "
+              f"(median size per scenario from {n} measured runs; free storage quota: 15 GB-month)")
     if total > 2 * 3600:
-        print("more than 2 hours: ask before starting (CLAUDE.md section 1)")
+        print("more than 2 hours: ask before starting (CLAUDE.md section 1), then pass --yes")
     return total
+
+
+def storage(runs, todo):
+    """projected bytes for todo runs, from the median measured size per scenario
+    (falls back to the stage median, then the overall median)"""
+    import statistics
+    sizes = defaultdict(list)
+    if manifest.exists():
+        for line in manifest.read_text().splitlines():
+            if line.strip():
+                m = json.loads(line)
+                if m.get("status") == "ok" and m.get("bytes"):
+                    sizes[("s", m["scenario"])].append(m["bytes"])
+                    sizes[("t", m["stage"])].append(m["bytes"])
+                    sizes["all"].append(m["bytes"])
+    if not sizes:
+        return 0, 0
+    tot = 0
+    for r in runs:
+        if r["run_id"] in todo and not r.get("skip"):
+            v = sizes.get(("s", r["scenario"])) or sizes.get(("t", r["stage"])) or sizes["all"]
+            tot += statistics.median(v)
+    return tot / 1e9, len(sizes["all"])
+
+
+def disk():
+    _, out = sh(f"du -sb {raw}", check=False)
+    b = int(out.split()[0]) if out else 0
+    msg = f"dataset/raw is {b / 1e9:.2f} GB"
+    if b > 10e9:
+        msg += " - over 10 GB: export (tools/export.py) and prune exported tiers"
+    return msg
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tier", required=True, choices=sorted(plan.matrix["tiers"]))
     ap.add_argument("--scenario", nargs="*", help="scenario or stage names")
-    ap.add_argument("--resume", action="store_true", help="skip runs already ok (default)")
-    ap.add_argument("--fill-gaps", action="store_true")
+    ap.add_argument("--resume", action="store_true", help="skip runs already ok (always on)")
+    ap.add_argument("--fill-gaps", action="store_true", help="also retry exhausted runs, add edge reps")
+    ap.add_argument("--retry", action="store_true", help="retry runs that used up their attempts (no new reps)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--rep", type=int, nargs="*", help="only these reps")
+    ap.add_argument("--ids", nargs="*", help="only these run ids")
     ap.add_argument("--list", action="store_true", help="print run ids")
+    ap.add_argument("--yes", action="store_true", help="confirm a batch estimated over 2 hours")
+    ap.add_argument("--no-build", action="store_true")
     args = ap.parse_args()
     runs = select(args)
-    ok = done_ids()
-    todo = {r["run_id"] for r in runs if r["run_id"] not in ok}
+    last, tries = history()
+    if args.fill_gaps:
+        runs += gaps(runs, last)
+    todo = [r for r in runs if last.get(r["run_id"]) != "ok" and not r.get("skip")
+            and (args.fill_gaps or args.retry or tries[r["run_id"]] < attempts)]
     if args.list:
         for r in runs:
-            print(r["run_id"], r["split"], r.get("netem"), r.get("capture_start"), r.get("skip") or "")
-    if args.dry_run:
-        dry_run(runs, todo)
+            print(r["run_id"], r["split"], r.get("netem"), r.get("capture_start"), last.get(r["run_id"], "-"), r.get("skip") or "")
+    if args.dry_run or args.list:
+        dry_run(runs, {r["run_id"] for r in todo})
         return
-    sys.exit("execution lands in phase 3")
+    if args.limit:
+        todo = todo[:args.limit]
+    global logfile
+    (raw / "_logs").mkdir(parents=True, exist_ok=True)
+    logfile = raw / "_logs" / f"{args.tier}-{time.strftime('%Y%m%d-%H%M%S')}.log"
+    log("args:", " ".join(sys.argv[1:]))
+    est = sum(plan.cost(r) for r in todo)
+    log(f"{len(todo)} runs to do ({len(runs) - len(todo)} done or skipped), estimate {hms(est)}")
+    if est > 2 * 3600 and not args.yes:
+        sys.exit("estimate over 2 hours: confirm with the user, then rerun with --yes")
+    if not todo:
+        return
+    topo.up(build=not args.no_build)
+    global lab_versions
+    lab_versions = topo.versions()
+    log("lab:", json.dumps(lab_versions))
+    n_ok = 0
+    for i, run in enumerate(todo, 1):
+        for a in range(tries[run["run_id"]] + 1, tries[run["run_id"]] + attempts + 1):
+            status, why = one(run, a)
+            log(f"[{i}/{len(todo)}] {run['run_id']} attempt {a}: {status}" + (f" - {'; '.join(why)[:300]}" if why else ""))
+            if status == "ok":
+                n_ok += 1
+                break
+    reset({})
+    log(f"batch done: {n_ok}/{len(todo)} ok. {disk()}")
 
 
 if __name__ == "__main__":

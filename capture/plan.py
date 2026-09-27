@@ -122,18 +122,8 @@ def build(tier):
         rep0 = st.get("rep_offset", 0)
         if stage == "edge":
             for eid, e in edges[st["level"]].items():
-                skip = algs_ok(e.get("needs"))
                 for rep in range(1, st["reps"] + 1):
-                    cfg = {**edge_base(), **e.get("config", {})}
-                    vs = e.get("variants")
-                    if vs:
-                        cfg.update(vs[(rep - 1) % len(vs)])
-                    rng = random.Random(f"{seed}:{stage}:{eid}:{rep}")
-                    runs.append(mk(tier, stage, eid, cfg, rep, rng.randrange(2**31), e["apps"],
-                                   e["duration_s"], edge_case=eid, netem="lan",
-                                   capture_start="before_tunnel", capture_delay_s=0, noise=False,
-                                   setup=e.get("setup", []), over={"a": e.get("a", {}), "b": e.get("b", {})},
-                                   expect=e["expect"], skip=skip))
+                    runs.append(edge_run(tier, eid, e, rep, seed))
             continue
         if stage == "handshake":
             for c in b_configs():
@@ -169,6 +159,21 @@ def build(tier):
     return runs
 
 
+def edge_run(tier, eid, e, rep, seed):
+    """one edge-case run; variants cycle by rep. late-capture cases are mid-stream"""
+    cfg = {**edge_base(), **e.get("config", {})}
+    vs = e.get("variants")
+    if vs:
+        cfg.update(vs[(rep - 1) % len(vs)])
+    rng = random.Random(f"{seed}:edge:{eid}:{rep}")
+    after = max([int(x.split("_")[-1]) for x in e.get("setup", []) if x.startswith("capture_after_")] or [0])
+    return mk(tier, "edge", eid, cfg, rep, rng.randrange(2**31), e["apps"], e["duration_s"],
+              edge_case=eid, netem="lan", capture_start="mid_stream" if after else "before_tunnel",
+              capture_delay_s=after, noise=False, setup=e.get("setup", []),
+              over={"a": e.get("a", {}), "b": e.get("b", {})}, expect=e["expect"],
+              app_len_s=e.get("app_len_s"), skip=algs_ok(e.get("needs")))
+
+
 def assign_split(runs, test=0.2):
     """per run, stratified by (tier, stage, scenario): the 20% of runs with the
     lowest hash(run_id) in each stratum go to test. stable across machines."""
@@ -183,5 +188,4 @@ def assign_split(runs, test=0.2):
 
 
 def cost(run):
-    return run["duration_s"] + run.get("capture_delay_s", 0) + matrix["overhead_s"] + \
-        max([int(s.split("_")[-1]) for s in run.get("setup", []) if s.startswith("capture_after_")] or [0])
+    return run["duration_s"] + run.get("capture_delay_s", 0) + matrix["overhead_s"]

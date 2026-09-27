@@ -85,8 +85,9 @@ subsets:
   # both modes, gcm + cbc, v4 + v6 -> 2 x 3 x 2 = 12
   a12: {mode: [tunnel, transport], esp: [aes128gcm16, aes256-sha256, aes128-sha1], outer_family: [v4, v6], encap: [false]}
   # replay (tcpreplay injects raw frames, which bypass xfrm, so it can only
-  # enter the tunnel from host_a through gw_a): tunnel only, 6 esp x 2 families = 12
-  t12: {mode: [tunnel], esp: [aes128gcm16, aes256gcm16, aes128-sha256, aes256-sha256, aes128-sha1, aes256-sha384], outer_family: [v4, v6], encap: [false]}
-  a_tunnel: {mode: [tunnel], esp: [aes128gcm16, aes256gcm16, aes128-sha256, aes256-sha256, aes128-sha1, aes256-sha384], outer_family: [v4, v6], encap: [false, true]}
+  # enter the tunnel from host_a through gw_a): tunnel only, 6 esp x 2 families = 12.
+  # inner is v4: the captures are v4 and tcprewrite cannot map v4 to v6
+  t12: {mode: [tunnel], esp: [aes128gcm16, aes256gcm16, aes128-sha256, aes256-sha256, aes128-sha1, aes256-sha384], outer_family: [v4, v6], encap: [false], inner_family: v4}
+  a_tunnel: {mode: [tunnel], esp: [aes128gcm16, aes256gcm16, aes128-sha256, aes256-sha256, aes128-sha1, aes256-sha384], outer_family: [v4, v6], encap: [false, true], inner_family: v4}
   # tunnel to the real internet, 4 esp x 2 outer families = 8
   inet8: {mode: [tunnel], esp: [aes128gcm16, aes256gcm16, aes256-sha256, aes128-sha1], outer_family: [v4, v6], encap: [false], inner_family: v4}
