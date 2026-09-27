@@ -35,7 +35,10 @@ The lab images and the media snapshot are private packages owned by
 Every shard pulls them by the digests pinned in [lab/images.lock](lab/images.lock),
 so all shards run identical images (`tools/merge.py` rejects runs that did not).
 
-**Publishing** (maintainer, needs a token with `write:packages` in `GHCR_TOKEN`):
+**Publishing** (maintainer): needs a **classic** personal access token with
+`write:packages` in `GHCR_TOKEN` (github.com/settings/tokens, "Tokens (classic)").
+Fine-grained tokens are refused by ghcr.io with "does not match expected scopes".
+`lab/images.sh` logs in with a throwaway docker config, so the token is never stored.
 
 ```bash
 bash lab/images.sh push && bash lab/images.sh push-media

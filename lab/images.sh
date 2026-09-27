@@ -9,7 +9,8 @@
 #                              the media snapshot (hls ladders + mirrored pages) as an
 #                              image, so every shard serves byte-identical content
 #
-# pushing needs a token with write:packages (GHCR_TOKEN, else GITHUB_TOKEN).
+# pushing needs a classic personal access token with write:packages in GHCR_TOKEN
+# (fine-grained tokens do not work with ghcr.io); pulling falls back to GITHUB_TOKEN.
 # packages are private by default; they carry org.opencontainers.image.source,
 # so they link to this repo and teammates with repo access can pull them.
 set -euo pipefail
@@ -30,10 +31,17 @@ build() {
   done
 }
 
+# registry credentials live in a throwaway docker config for this invocation only,
+# never in ~/.docker/config.json (docker would store the token there in plain text)
+cfg=$(mktemp -d)
+trap 'rm -rf "$cfg"' EXIT
+dk() { docker --config "$cfg" "$@"; }
+
 login() {
   tok=${GHCR_TOKEN:-${GITHUB_TOKEN:-}}
   [ -n "$tok" ] || { echo "no GHCR_TOKEN / GITHUB_TOKEN"; return 1; }
-  echo "$tok" | docker login ghcr.io -u "${GITHUB_USER:-$owner}" --password-stdin >/dev/null
+  echo "$tok" | dk login ghcr.io -u "${GITHUB_USER:-$owner}" --password-stdin >/dev/null 2>&1 \
+    || { echo "ghcr login refused (need a classic token with write:packages to push, read:packages to pull)"; return 1; }
 }
 
 case "${1:-pull}" in
@@ -46,7 +54,7 @@ case "${1:-pull}" in
     : > "$lock.tmp"
     for i in $imgs; do
       docker tag "antar/$i" "$base-$i:$tag"
-      docker push -q "$base-$i:$tag" >/dev/null
+      dk push -q "$base-$i:$tag" >/dev/null
       d=$(docker image inspect -f '{{index .RepoDigests 0}}' "$base-$i:$tag")
       echo "$i $d" >> "$lock.tmp"
       echo "pushed $d"
@@ -56,7 +64,7 @@ case "${1:-pull}" in
     if [ ! -s "$lock" ]; then echo "no $lock: building locally"; build; exit 0; fi
     login 2>/dev/null || true
     grep -v '^media ' "$lock" | while read -r i d; do
-      if docker pull -q "$d" >/dev/null 2>&1; then
+      if dk pull -q "$d" >/dev/null 2>&1; then
         docker tag "$d" "antar/$i"
         echo "pulled $d"
       else
@@ -76,7 +84,7 @@ EOD
     cp ATTRIBUTION.md media/ATTRIBUTION.md
     docker build -q --label "org.opencontainers.image.source=$src" -t "$base-media:$tag" -f media/Dockerfile media >/dev/null
     rm -f media/Dockerfile media/ATTRIBUTION.md
-    docker push -q "$base-media:$tag" >/dev/null
+    dk push -q "$base-media:$tag" >/dev/null
     d=$(docker image inspect -f '{{index .RepoDigests 0}}' "$base-media:$tag")
     grep -v '^media ' "$lock" > "$lock.tmp" 2>/dev/null || true
     echo "media $d" >> "$lock.tmp" && mv "$lock.tmp" "$lock"
@@ -85,7 +93,7 @@ EOD
     d=$(awk '$1 == "media" {print $2}' "$lock")
     [ -n "$d" ] || { echo "no media digest in $lock: run lab/media.sh"; exit 1; }
     login 2>/dev/null || true
-    docker pull -q "$d" >/dev/null
+    dk pull -q "$d" >/dev/null
     cid=$(docker create "$d" /none)
     mkdir -p media && rm -rf media/hls media/sites
     docker cp "$cid:/media/hls" media/hls && docker cp "$cid:/media/sites" media/sites
