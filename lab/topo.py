@@ -74,6 +74,8 @@ def wire(multi_only=False):
     """idempotent: bridges in this lab's switch namespace, one veth per member.
     containers restarted (or a restarted codespace) simply get new veths."""
     if sh(f"sudo ip netns exec {swns} true", check=False)[0]:
+        # a restart can leave a stale /run/netns entry behind
+        sh(f"sudo ip netns del {swns}", check=False)
         sh(f"sudo ip netns add {swns}")
         sh(f"sudo ip netns exec {swns} ip link set lo up")
     # bridges and their ports are pure l2 plumbing: no ipv6 on them, or they send
