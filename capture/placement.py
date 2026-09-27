@@ -219,5 +219,7 @@ def machine():
         model = next(l for l in open("/proc/cpuinfo") if l.startswith("model name")).split(":", 1)[1].strip()
     except Exception:
         pass
-    return {"cores": os.cpu_count(), "mem_gb": round(mem, 1), "cpu": model,
+    return {"env": "codespaces" if os.environ.get("CODESPACES") == "true" else "other",
+            "account": os.environ.get("GITHUB_USER", ""),
+            "cores": os.cpu_count(), "mem_gb": round(mem, 1), "cpu": model,
             "codespace": os.environ.get("CODESPACE_NAME", ""), "machine_class": os.environ.get("ANTAR_MACHINE", "")}

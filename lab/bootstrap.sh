@@ -7,6 +7,7 @@ export DEBIAN_FRONTEND=noninteractive
 echo "wireshark-common wireshark-common/install-setuid boolean true" | sudo debconf-set-selections
 sudo apt-get update -qq
 sudo apt-get install -y -qq tshark tcpdump tcpreplay zstd jq iproute2 >/dev/null
+command -v gh >/dev/null || sudo apt-get install -y -qq gh >/dev/null
 # bridged lab traffic must bypass docker forward rules (preflight re-applies this)
 sudo sysctl -qw net.bridge.bridge-nf-call-iptables=0 net.bridge.bridge-nf-call-ip6tables=0 || true
 sudo usermod -aG wireshark "$USER" || true
