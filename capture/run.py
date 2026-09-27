@@ -968,6 +968,20 @@ def parse_slice(v):
     return i, n
 
 
+def live_workers():
+    """pids of run.py worker processes on this machine (any batch)"""
+    out = []
+    for d in Path("/proc").iterdir():
+        if d.name.isdigit() and int(d.name) != os.getpid():
+            try:
+                cmd = (d / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+            except OSError:
+                continue
+            if "capture/run.py" in cmd and "--worker" in cmd:
+                out.append(int(d.name))
+    return out
+
+
 def worker(k, batch_file):
     """one lab: bring it up, then claim and run until the batch is exhausted"""
     global logfile, lab_versions
@@ -980,7 +994,13 @@ def worker(k, batch_file):
     log(f"lab {k} up:", json.dumps(lab_versions))
     _, tries = history()
     labst = {"tunnel": None}
+    parent = os.getppid()
     while True:
+        # an orphaned worker (its coordinator was killed) must stop: a new batch
+        # would otherwise run on the same lab and both would ruin each other's runs
+        if os.getppid() != parent:
+            log(f"lab {k}: coordinator gone, stopping")
+            break
         with placement.locked():
             done = set(placement.load_state().get("done", {}))
         if ids <= done:
@@ -1101,6 +1121,10 @@ def main():
         # pinned registry images when lab/images.lock exists (the same digests on
         # every shard), else a local build
         sh(f"bash {root}/lab/images.sh pull", timeout=3600)
+    # one batch per machine: refuse while workers of another batch are alive
+    others = live_workers()
+    if others:
+        sys.exit(f"workers of another batch are still running (pids {others}): stop them first")
     # keys once, before any worker starts (workers only copy them into their labs)
     topo.ensure_keys()
     # a fresh batch: its runs, and an empty placement state
@@ -1110,6 +1134,15 @@ def main():
     with placement.locked():
         placement.save_state({"batch": bf.name, "active": {}, "held": {}, "done": {}, "history": []})
     procs = []
+
+    def stop(sig, frame):
+        # stopping the coordinator stops its workers
+        for p in procs:
+            p.terminate()
+        sys.exit(f"stopped by signal {sig}")
+    import signal
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
     for k in range(args.labs):
         e = {**os.environ, "ANTAR_LAB": str(k), "ANTAR_LABS": str(args.labs)}
         procs.append(subprocess.Popen([sys.executable, __file__, "--tier", args.tier, "--worker", str(k),
