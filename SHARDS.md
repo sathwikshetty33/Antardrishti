@@ -18,7 +18,7 @@ it once, on one codespace, before any shard starts.
 On github.com/sathwikshetty33/SIH: **Code, Codespaces, "...", New with options**:
 
 - branch `main`, dev container `antardrishti`
-- machine type **4-core** (not 2-core: each shard runs 3 labs side by side)
+- machine type **4-core**
 - the codespace bills your own account's free quota (check github.com/settings/billing)
 
 The container runs `lab/bootstrap.sh` on creation: tools, the pinned lab images and the
@@ -44,8 +44,8 @@ github.com/settings/codespaces:
 ## 4. Run your slice
 
 ```bash
-python3 capture/run.py --tier p0 --labs 3 --slice i/n --dry-run   # estimate first
-python3 capture/run.py --tier p0 --labs 3 --slice i/n --yes       # the batch
+python3 capture/run.py --tier p0 --labs 1 --slice i/n --dry-run   # estimate first
+python3 capture/run.py --tier p0 --labs 1 --slice i/n --yes       # the batch
 ```
 
 - Keep the browser tab open or the terminal busy; the batch logs to
@@ -53,7 +53,7 @@ python3 capture/run.py --tier p0 --labs 3 --slice i/n --yes       # the batch
 - After an idle stop or a restart, run the same command again: finished runs are
   skipped, an interrupted run is redone from scratch.
 - Do not edit `capture/matrix.yaml`, `capture/edge.yaml` or `capture/netem.yaml`, do
-  not use more than 3 labs, and do not rebuild images: any of these makes the merge
+  not use more than 1 lab (parallel labs bias timing), and do not rebuild images: any of these makes the merge
   reject your shard.
 
 ## 5. Verify before handing back

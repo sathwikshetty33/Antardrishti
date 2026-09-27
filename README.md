@@ -22,7 +22,7 @@ datasheet is [dataset/README.md](dataset/README.md).
 ```bash
 bash lab/bootstrap.sh                      # tools, pinned images, media
 python3 lab/preflight.py                   # what this kernel supports
-python3 capture/run.py --tier p0 --labs 3 --dry-run
+python3 capture/run.py --tier p1 --labs 1 --dry-run
 ```
 
 Several teammates can each capture a slice of a tier: see [SHARDS.md](SHARDS.md).

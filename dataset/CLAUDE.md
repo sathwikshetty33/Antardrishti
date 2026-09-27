@@ -23,9 +23,10 @@ keys. Plaintext captures and keys exist **only** in the dataset, as ground truth
   - Docker-in-Docker
   - Python 3.12
   - `"privileged": true` and `"capAdd": ["NET_ADMIN"]`
-- Run every capture batch on a **4-core** machine with **3 parallel labs**
-  (`capture/run.py --labs 3`, see "Parallel labs" in section 5). There is no separate
-  2-core plan; a 2-core machine is fine for development.
+- Run every capture batch on a **4-core** machine with **one lab** (`--labs 1`, the
+  default). Parallel labs failed the adversarial validation (section 12): they bias
+  packet timing. There is no separate 2-core plan; a 2-core machine is fine for
+  development.
 - Budget. The free personal quota is 120 core-hours and 15 GB-month storage.
   - A 4-core machine burns 4 core-hours per hour of runtime.
   - Always print a time estimate (`--dry-run`) before starting a batch. It simulates the
@@ -421,6 +422,11 @@ not significantly above chance (paired permutation test, p ≥ 0.05). Otherwise 
 concurrency and retest. The result is recorded in `dataset/README.md`. These tiers are
 not part of the dataset.
 
+**Result (2026-09-27): failed.** AUC 0.724 (permutation p 0.005); video 0.787, voip
+0.678, web 0.696, all driven by inter-arrival times. Capture with `--labs 1`. A retest
+at 2 labs would need an interleaved design (serial and parallel batches alternating in
+one session) to separate concurrency from drift; until one passes, do not raise it.
+
 ---
 
 ## 6. Edge cases (`capture/edge.yaml`)
@@ -569,7 +575,7 @@ ghcr. Acceptance:
 - the adversarial validation passes (section 5); only then may P0 use `--labs 3`
 
 **Phase 4: P0 capture.** Done 2026-09-27 (section 12). Only with the user's go-ahead on the time estimate. Run with
-`--labs 3` on 4-core codespaces, split with `--slice i/n` across teammates if wanted,
+`--labs 1` (parallel labs failed the validation) on 4-core codespaces, split with `--slice i/n` across teammates if wanted,
 merge with `tools/merge.py`. Then `coverage.py` must pass P0.
 
 **Phase 5: labels + spot-check.**
@@ -605,8 +611,8 @@ merge with `tools/merge.py`. Then `coverage.py` must pass P0.
 
 ## 11. Capture runbook (how a tier is captured end to end)
 
-This is the procedure P0 was captured with. Use it for P1 and P2. Times are for 3 labs
-on a 4-core codespace.
+This is the procedure P0 was captured with (P0 used 3 labs; since the adversarial
+validation failed, use `--labs 1`). Use it for P1 and P2.
 
 ### 11.1 Once per account
 
@@ -623,7 +629,7 @@ on a 4-core codespace.
 ### 11.2 Plan
 
 ```bash
-python3 capture/run.py --tier p1 --labs 3 --slice 1/2 --dry-run   # every shard of a 2-way split
+python3 capture/run.py --tier p1 --labs 1 --slice 1/2 --dry-run   # every shard of a 2-way split
 ```
 
 Check: every shard within 15% of the others, both modes and all wire shapes in each,
@@ -655,7 +661,7 @@ shard: copy files with `gh codespace cp -e 'remote:<path>' .` from the maintaine
 Each slice runs detached, so it survives a closed session:
 
 ```bash
-setsid nohup python3 capture/run.py --tier p1 --labs 3 --slice i/n --yes \
+setsid nohup python3 capture/run.py --tier p1 --labs 1 --slice i/n --yes \
   > dataset/raw/_logs/p1-slice-i.out 2>&1 < /dev/null & disown
 ```
 
@@ -707,14 +713,15 @@ Details in `dataset/README.md` (P0 collection) and `dataset/coverage.md`.
 Pinned images from ghcr, kernel XFRM, netem available.
 
 **Decisions.**
+- Parallel labs: the adversarial validation, finished after P0, **failed** (AUC 0.724,
+  p 0.005; video 0.787, voip 0.678, web 0.696; top features are inter-arrival times).
+  P0 timing features are biased; sizes and IKE content are not. P1 onward: `--labs 1`.
+  Open: recapture the 192 P0 traffic runs serially (about 6 h, 24 core-hours).
 - Set A reduced to 32 configs (4 ESP wire shapes; AES key size drawn per tunnel), tunnel
   reuse per config, 2 extra short tunnels per config, 25% test split per tunnel
   stratified by shape x mode (8 test tunnels, 8 test runs per app).
-- The adversarial validation of parallel labs was **started but not completed**
-  (27/27 serial, 3/91 parallel runs kept in the manifest, tiers `avs` and `avp`):
-  the owner chose to start P0 without waiting for it. Finish it with
-  `python3 tools/advval.py run --yes && python3 tools/advval.py analyze`; until then the
-  datasheet states that parallel-lab effects are unmeasured.
+- The adversarial validation ran after P0 (the owner chose not to wait for it); its
+  runs are tiers `avs` and `avp` in the manifest, results in `dataset/advval.json`.
 
 **Incidents during P0, and what was done** (every fix is in `main`):
 
@@ -734,6 +741,7 @@ source, so opus calls ended at once (384ad8c); DNS lookups hung in the isolated 
 (immediate failure since the veth refactor); Chrome needs ipv6 literals without
 brackets in its resolver rules.
 
-**Open items.** Finish the adversarial validation (above). Labels and the decryption
-spot-check (phase 5). P1 (chat, mixtures, P1 edges; about 24 core-hours), then P2 if
-quota remains.
+**Open items.** Labels and the decryption spot-check for P0 (phase 5, tools ready:
+`tools/labels.py`, `tools/decrypt_check.py`). Serial recapture of the P0 traffic runs.
+P1 with `--labs 1` (about 6h48m, 27 core-hours), then P2 if quota remains. Shard-2 ran
+Docker 29.8.1, the maintainer codespace 29.8.0 (same kernel and images).
