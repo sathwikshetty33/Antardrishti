@@ -117,6 +117,9 @@ def claim(runs, lab, done, cost_fn=None):
     """under the lock: choose, mark active, update the held tunnel group"""
     with locked():
         s = load_state()
+        # done as of now, not as the caller last read it: a run another lab just
+        # released would otherwise look free and be captured twice
+        done = set(done) | set(s.get("done", {}))
         r = pick(runs, lab, s, done)
         if r is None:
             return None
