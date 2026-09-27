@@ -25,7 +25,18 @@ features are all inter-arrival times: parallel labs change packet timing, not si
 **P1 runs with `--labs 1`** (the default). Do not raise it without a new, interleaved
 validation that passes.
 
-P1 at `--labs 1`: about **6h48m wall, 27.2 core-hours, 0.8 GB** (`--dry-run`).
+## P1 plan changes (approved by the owner, 2026-09-27)
+
+- Mixtures: 10 combos on 8 configs (`a8`, one per wire shape x mode), 90 s: 8 runs per combo.
+- Anchor set: the 6 single apps on the same 8 configs, 60 s, validated like P0 traffic.
+- Live chat 60 s (targets lowered to match: 32 runs, 930 windows); realism 8 runs.
+- Every P1 traffic run is captured alone on its machine and records `timing_valid: true`;
+  P1 edge cases record `timing_valid: false`. The 192 P0 traffic runs are annotated
+  `timing_valid: false` in the manifest (append-only).
+- `--slice i/n` for P1: `plan.deal` balances time, stages and configs; each slice runs in
+  seeded random order (a tunnel group's runs stay together).
+- P1 at `--labs 1`: 208 runs (16 WhatsApp skipped without pcaps), about 5h serial:
+  **2 slices 2h31m each, 21.5 core-hours with setup, 0.66 GB** (`--dry-run`).
 
 ## Pinned images (P1 must use exactly these)
 
@@ -38,7 +49,8 @@ noise    sha256:e7f822bb5a3524dd48651baf7dce8710911b199cebc96f5f8ce945016ee09e83
 media    sha256:1d265727457bdecc1f0c2c4a77e7190096c9153ea3b5b1ff191dc39002322a39
 ```
 
-All under `ghcr.io/sathwikshetty33/antardrishti-<name>`, as in `lab/images.lock`. Each
+All under `ghcr.io/sathwikshetty33/antardrishti-<name>`, as in `lab/images.lock`; every P1
+run records all six (`digest_media` from `lab/media/.digest`). Each
 package also lists two untagged versions next to the tagged one: its `linux/amd64`
 platform manifest and a build-provenance record. They belong to the pinned image; never
 delete them.
@@ -46,9 +58,12 @@ delete them.
 ## Plan identity
 
 - Tier seeds: p0 26001, **p1 26002**, p2 26003. Design fingerprint (`plan.design_sha`):
-  **`289a5fa670fce4d6`**. Every P1 run must record both; `tools/merge.py` rejects runs
-  with a different seed, design or images.
-- Do not edit `capture/matrix.yaml`, `capture/edge.yaml` or `capture/netem.yaml`.
+  P0 `289a5fa670fce4d6`; since the P1 plan changes **`99777e42f47d44c0`**, P1 plan
+  fingerprint (`plan.plan_sha`) **`5f0407f286144a36`**. Every P1 run records them;
+  `tools/merge.py --tier p1` rejects runs with a different seed, design, plan or images
+  (merge per tier: the P0 lines keep their older design).
+- Do not edit `capture/matrix.yaml`, `capture/edge.yaml` or `capture/netem.yaml` beyond
+  the approved plan changes.
 - WhatsApp replay is skipped unless pcaps are in `dataset/external/whatsapp/` (never
   synthesized). Realism (internet) runs may find YouTube blocked: record it, move on.
 
@@ -85,3 +100,23 @@ delete them.
 - `gh` (needed for release download and upload) is in the devcontainer since this
   handoff; a codespace created earlier gets it with `bash lab/bootstrap.sh`, or
   `sudo apt-get install -y gh`.
+- **P1 account (`sathwik34`).** Its Codespaces secret is named `GHCP_TOKEN` (used as
+  `GH_TOKEN` for `gh codespace`); ghcr pulls use the codespace's own credential once
+  the account has Read access to the six packages. A codespace created before that
+  access got local images and a local media crawl from the old fallback: re-pull with
+  `bash lab/images.sh pull && bash lab/images.sh pull-media` and compare RepoDigests
+  with `lab/images.lock` line by line. The fallback is gone (a refused pull now fails).
+- **Realism** needs the tunnel's DNS through the machine's own resolver (codespaces drop
+  queries to 1.1.1.1 / 8.8.8.8) and gw_a's LAN kept out of the 0.0.0.0/0 tunnel (route
+  rule + bypass policy in `topo.nat`); without them no page loads. YouTube answers
+  datacenter addresses with a bot check: retried like a failure, then recorded on the
+  last attempt as `observed.blocked` (a coverage gap), never worked around. Only
+  realism runs get internet access; every reset restores P0's lab network.
+- **e22** (IKE fragmentation) uses the lab PKI's big chain (RSA 4096 cert under an RSA
+  4096 intermediate), installed on the gateways only for e22 runs; **e23** gets its
+  second child SA from the `voip_child` setup action. Neither changes an image.
+- **e26** (replay attempt) replays from the host into the router's namespace
+  (`sudo nsenter`): the pinned router image has no tcpreplay. Its capture file is
+  removed first: with `fs.protected_regular` tcpdump cannot overwrite an earlier run's
+  file in `/tmp`, and replaying the stale one sends a dead SA's packets
+  (`XfrmInNoStates` on gw_b, no replay counted).

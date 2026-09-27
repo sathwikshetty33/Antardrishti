@@ -25,12 +25,13 @@ The container runs `lab/bootstrap.sh` on creation: tools, the pinned lab images 
 media snapshot. Check it:
 
 ```bash
-bash lab/images.sh pull          # every line must say "pulled ghcr.io/...@sha256:..."
-python3 lab/preflight.py         # every check ok; netem available
+bash lab/images.sh pull          # every line must say "pulled" or "present ghcr.io/...@sha256:..."
+bash lab/images.sh pull-media    # "media from ghcr.io/...": the pinned snapshot
+python3 lab/preflight.py         # every check ok ("pinned images" included); netem available
 ```
 
-If an image line says "building locally", stop and ask the maintainer for package
-access: runs on local builds are rejected at merge.
+If a line says "pull refused", stop and ask the maintainer for package access: images
+are never built locally (runs on local builds are rejected at merge).
 
 ## 3. Raise the idle timeout
 
@@ -44,9 +45,13 @@ github.com/settings/codespaces:
 ## 4. Run your slice
 
 ```bash
-python3 capture/run.py --tier p0 --labs 1 --slice i/n --dry-run   # estimate first
-python3 capture/run.py --tier p0 --labs 1 --slice i/n --yes       # the batch
+python3 capture/run.py --tier p1 --labs 1 --slice i/n --dry-run   # estimate first
+python3 capture/run.py --tier p1 --labs 1 --slice i/n --yes       # the batch
 ```
+
+The `plan:` line of the dry run (seed, design, plan, images) must be the same on every
+slice. A P1 slice runs its share in a seeded order; its traffic runs are captured alone
+on the machine (`timing_valid`).
 
 - Keep the browser tab open or the terminal busy; the batch logs to
   `dataset/raw/_logs/`.
@@ -59,7 +64,7 @@ python3 capture/run.py --tier p0 --labs 1 --slice i/n --yes       # the batch
 ## 5. Verify before handing back
 
 ```bash
-python3 capture/run.py --tier p0 --slice i/n --status   # must print COMPLETE
+python3 capture/run.py --tier p1 --slice i/n --status   # must print COMPLETE
 ```
 
 If runs are listed as exhausted (failed or mismatched three times), run the batch once
@@ -71,26 +76,27 @@ still fail; never edit the manifest by hand.
 The manifest, on a branch:
 
 ```bash
-git checkout -b shard/p0-i-of-n
+git checkout -b shard/p1-i-of-n
 git add dataset/manifest.jsonl
-git commit -m "data: Add p0 slice i/n manifest."
-git push -u origin shard/p0-i-of-n
+git commit -m "data: Add p1 slice i/n manifest."
+git push -u origin shard/p1-i-of-n
 ```
 
 The captures (never commit them):
 
 ```bash
-python3 tools/export.py --tier p0 --slice i/n
+python3 tools/export.py --tier p1 --slice i/n
 ```
 
-Upload `dataset/export/p0-slice-i-of-n-*.tar.zst` and its `.sha256` where the
-maintainer says (for example as assets of a GitHub release on this repository). Keep
-the codespace until the maintainer confirms the merge.
+Upload `dataset/export/p1-slice-i-of-n-*.tar.zst` and its `.sha256` where the
+maintainer says (for P1: the draft release `p1-slice<i>` on this repository), then
+download them again and check with `sha256sum -c`. Keep the codespace until the
+maintainer confirms the merge.
 
-The maintainer merges all shards with
+The maintainer merges the tier's lines of all shards with
 
 ```bash
-python3 tools/merge.py git:origin/shard/p0-1-of-n git:origin/shard/p0-2-of-n ...
+python3 tools/merge.py --tier p1 dataset/manifest.jsonl git:origin/shard/p1-1-of-n git:origin/shard/p1-2-of-n ...
 ```
 
-which rejects any shard built from a different plan, seed or image set.
+which rejects any shard built from a different plan, seed, design or image set.

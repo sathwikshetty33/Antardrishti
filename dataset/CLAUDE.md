@@ -33,9 +33,11 @@ keys. Plaintext captures and keys exist **only** in the dataset, as ground truth
     parallel schedule and prints wall-clock, core-hours and storage per shard.
   - Ask the user before starting anything estimated at more than 2 hours.
 - Lab images come from ghcr.io, pinned by digest in `lab/images.lock`
-  (`lab/images.sh pull`, with a local build as fallback), so every shard runs identical
-  images. The media snapshot (HLS ladders, mirrored pages) is pinned the same way
-  (`lab/images.sh pull-media`). Every run records the image digests it used.
+  (`lab/images.sh pull`), so every shard runs identical images. The media snapshot (HLS
+  ladders, mirrored pages) is pinned the same way (`lab/images.sh pull-media`, which
+  records its digest in `lab/media/.digest`). A refused pull is an error, never a local
+  build or crawl (runs on those are rejected at merge): bootstrap, preflight and every
+  batch check the pins. Every run records the image and media digests it used.
 - Docker's image store survives a codespace restart only when the codespace runs this
   repo's devcontainer (docker-in-docker keeps `/var/lib/docker` on a volume). Otherwise
   every restart costs an image pull or rebuild.
@@ -104,6 +106,7 @@ tools/
   coverage.py           # checks sufficiency targets (section 7), writes coverage.md
   checkmeta.py          # checks run folders against section 4
   merge.py              # merges manifests from several shards (section 5, tiers)
+  annotate.py           # appends annotation lines to the manifest (section 4)
   advval.py             # adversarial validation of parallel labs (section 5)
   labels.py             # builds per-packet labels (section 8)
   export.py             # packs tiers into tar.zst for upload
@@ -237,24 +240,44 @@ How to take each capture:
   "ipsec_backend": "kernel", "strongswan_version": "...", "kernel": "...",
   "status": "ok", "duration_s": 90, "sha256": {"outer.pcap.zst": "..."},
   "group": "p0-traffic-3fa9c1d2-r1", "group_pos": 0, "group_size": 6,
-  "lab_id": 0, "labs": 3,
-  "concurrency": {"max": 3, "mean": 2.8, "overlapping": [{"lab": 1, "run_id": "...", "cls": "light"}]},
+  "lab_id": 0, "labs": 1, "timed": true, "timing_valid": true, "order": 17,
+  "concurrency": {"max": 1, "mean": 1.0, "overlapping": []},
   "load": {"cpu_busy_mean": 41.0, "cpu_busy_max": 63.0, "loadavg_start": [], "loadavg_end": []},
-  "machine": {"cores": 4, "mem_gb": 16.4, "cpu": "...", "codespace": "..."},
-  "images": {"digest_gw": "ghcr.io/...@sha256:...", "...": "..."}
+  "machine": {"env": "codespaces", "account": "...", "codespace": "...", "cores": 4,
+              "mem_gb": 16.4, "cpu": "...", "kernel": "..."},
+  "images": {"digest_gw": "ghcr.io/...@sha256:...", "digest_media": "ghcr.io/...", "...": "..."},
+  "plan": {"tier_seed": 1234, "design_sha": "...", "plan_sha": "...", "code": "..."}
 }
 ```
 
 `config` of set-A runs also records `esp_shape` (the wire shape) and `esp_aes_bits`
 (the key size drawn for the tunnel).
 
+- `timing_valid` is true only for a run of a timing-sensitive stage (`timed`: traffic,
+  anchor, mixtures, chat, whatsapp, realism, public) captured alone on its machine
+  (concurrency 1, no overlapping run). Edge, handshake and short runs are never
+  timing-valid. The P0 traffic runs predate the field; the manifest annotates them
+  `timing_valid: false` (3 parallel labs, section 12).
+- After P0, `order` is the run's position in its slice's seeded order, and
+  `plan.plan_sha` fingerprints the tier's plan: every slice of a tier must share it.
+  `machine` names the environment, account and codespace (a batch started over ssh
+  reads them from the codespace's env file). `observed.blocked` lists apps that
+  reported a block (YouTube), `notes.dns` the resolvers of an internet run.
+- The manifest holds one line per attempt, plus annotation lines written by
+  `tools/annotate.py` (`{"annotation": {...}, "run_id", "tier", "stage", "reason",
+  "ts"}`). An annotation never edits an attempt: readers merge it into its run's latest
+  attempt recorded before it, and a later attempt stands on its own.
+
 - `split` is assigned deterministically, never across a tunnel:
   - **Tunnels** (traffic, short and the other traffic-like stages): **25% test** per tier
     and stage, stratified by (mode, ESP wire shape). With the 32 set-A tunnels that is
     exactly one test tunnel per shape × mode pair (8 test tunnels, so 8 test runs per
     app). Inside a pair, family and NAT-T rotate: the two modes of a shape get opposite
-    family and NAT-T, and every (family, NAT-T) combination is used equally. All runs of
-    a tunnel share its split, so train and test never share a tunnel's SAs, SPIs or keys.
+    family and NAT-T, and every (family, NAT-T) combination is used equally. After P0, a
+    stage with fewer test tunnels than (mode, shape) strata (the 8-config P1 stages give
+    2) spreads them: modes alternate and shapes rotate per stage, so both modes reach
+    test. All runs of a tunnel share its split, so train and test never share a tunnel's
+    SAs, SPIs or keys.
   - **Handshake and edge runs**: 20% test per run, stratified by scenario, lowest hash.
   Never split windows or packets of one run across train and test.
 - `expected` comes from the design. `observed` comes from charon logs and tshark on the
@@ -369,18 +392,42 @@ Run in order. Each tier must pass its coverage check before the next starts.
 - **handshake:** set B × 3 reps (60 runs)
 - **edge:** every P0 edge case × 3 reps
 
-**P1 (strongly wanted, about 7 h)**
-- **mixtures:** 10 combos × 12 set-A configs (both modes, GCM + CBC, v4 + v6), 120 s.
+**P1 (strongly wanted; about 5 h serial, `--dry-run` prints it per slice)**
+
+Every P1 traffic run (mixtures, anchor, chat, whatsapp, realism) is captured alone on its
+machine (`--labs 1`, never next to another run) and records `timing_valid: true`. P1
+edge cases are not timing-sensitive: `timing_valid: false`, and they may share lanes.
+- **mixtures:** 10 combos × 8 set-A configs (`a8`: one per wire shape × mode; the two
+  modes of a shape get opposite family and NAT-T, and each (family, NAT-T) is used
+  twice), 90 s: 8 runs per combo.
   - Stagger app start and stop randomly so each run contains pure and mixed segments.
   - Combos: voip+video, voip+web, video+web, web+email, voip+bulk, video+bulk,
     icmp+web, chat+web, email+bulk, voip+video+web.
-- **chat:** live XMPP across set A in both modes (32 runs), plus WhatsApp replay × 16 configs if pcaps
-  exist (tunnel mode only: tcpreplay injects raw frames, which bypass XFRM, so replay can
-  only enter the tunnel from `host_a` through `gw_a`; inner family v4).
-- **realism:** tunnel mode to the real internet (web, plus video via YouTube if reachable) ×
-  8 configs × 2 reps. YouTube often blocks datacenter IPs. If it does, record that and move
-  on; don't work around it.
-- **edge:** P1 edge cases × 3 reps.
+- **anchor:** the six single apps (voip, video, web, email, icmp, bulk) on the same 8
+  configs, 60 s, validated like P0 traffic: timing-valid references, since the P0
+  traffic runs were captured with 3 parallel labs.
+- **chat:** live XMPP across set A in both modes (32 runs, 60 s), plus WhatsApp replay ×
+  16 configs if pcaps exist (tunnel mode only: tcpreplay injects raw frames, which bypass
+  XFRM, so replay can only enter the tunnel from `host_a` through `gw_a`; inner family v4).
+- **realism:** tunnel mode to the real internet × 8 configs × 1 rep (8 runs): web on the
+  live pages of `lab/sites.txt`, plus a Blender film on YouTube if reachable. YouTube
+  often blocks datacenter IPs ("confirm you're not a bot"). A blocked attempt is retried
+  like any failed one; the last attempt keeps the run (its web traffic) and records the
+  block in `observed.blocked`, reported as a gap. Don't work around it. `host_a`
+  resolves through the tunnel with the machine's own upstream resolver (codespaces drop
+  queries to public resolvers), and `gw_a` keeps its own LAN out of the 0.0.0.0/0
+  tunnel, as strongSwan's bypass-lan would (a main-table rule and a bypass policy), so
+  replies and path-MTU ICMP reach `host_a`.
+- **edge:** P1 edge cases × 3 reps. e22's big chain (an RSA 4096 certificate under an RSA
+  4096 intermediate, from the lab PKI) is on the gateways only during e22 runs, e23 adds
+  a second child SA for VoIP (UDP), and e26 replays from the host into the router's
+  network namespace (the router image has no tcpreplay) from a fresh capture file (in
+  the sticky `/tmp` tcpdump cannot overwrite an earlier run's file, and a stale one
+  replays a dead SA's packets, which the responder drops as unknown SPIs instead of
+  counting replays). No image changes.
+- Only realism runs reach the internet: NAT, the internet DNS and gw_a's LAN bypass are
+  set for internet runs and removed by the reset before every other run, which keeps
+  P0's lab network (no DNS, lan_a to lan_b selectors) exactly.
 
 **P2 (only if quota remains)**
 - A second rep of P0 traffic with a different seed.
@@ -388,9 +435,16 @@ Run in order. Each tier must pass its coverage check before the next starts.
   A. These are always `replayed: true` and are never used as the only test source.
 
 The quota tip: every teammate's personal account has its own free quota. Split a tier
-with `capture/run.py --slice i/n`: units (tunnel groups, single runs) are dealt
-round-robin in hash order, stratum by stratum, so each shard gets a balanced mix of
-apps, configs and scenarios. All shards pull the same image digests. Teammates follow
+with `capture/run.py --slice i/n`. P0 dealt units (tunnel groups, single runs)
+round-robin in hash order, stratum by stratum (`plan.slice_units`, kept for P0 and the
+adversarial tiers). From P1 on, `plan.deal` deals each stratum (stage, edge case),
+largest units first, to the least-loaded slice in estimated seconds, so the slices
+finish together; among equally loaded slices a tunnel group goes where its config, wire
+shape and mode are least represented, so no config is tied to one machine. Replay
+strata are dealt last, round-robin, so whether their pcaps exist never moves another
+unit. Inside a slice the units run in seeded random order (a group's runs together, in
+group order), so run type is not tied to time of capture. All shards pull the same
+image digests. Teammates follow
 [SHARDS.md](../SHARDS.md): 4-core codespace, GHCR read access, maximum idle timeout,
 `--slice i/n`, `--status` must say COMPLETE, then hand back the manifest on a branch and
 the captures via `tools/export.py`. Merge with `tools/merge.py`: it rejects (writes
@@ -409,6 +463,9 @@ workers share a placement state (`capture/placement.py`):
 - no run starts while the machine's CPU is above ~70%
 - a tunnel group stays on the lab holding its tunnel; everything else (email, icmp,
   handshake, edge) is light and fills the other labs
+- a timed run (timing-sensitive stage) starts only on an idle machine, and nothing starts
+  next to it; after P0 runs start in their slice's seeded order, a timed one holding back
+  the runs after it
 
 Every run records `lab_id`, `labs`, concurrency, load, machine and image digests.
 
@@ -493,7 +550,11 @@ carry ESP are recorded separately (`observed.windows_2s.esp_active`).
 | each single app class (P0) | ≥ 32 ok runs, ≥ 1,400 two-second windows, covering ≥ 90% of set-A configs |
 | each single app class (with P2) | ≥ 40 ok runs, ≥ 1,500 two-second windows |
 | each set-A config | ≥ 5 ok runs |
-| each mixture combo | ≥ 8 ok runs |
+| each mixture combo (P1) | ≥ 8 ok runs, ≥ 1 in test |
+| each anchor app (P1) | ≥ 8 ok runs (all 8 `a8` configs), ≥ 230 two-second windows, ≥ 2 test runs |
+| live chat (P1, 60 s runs) | ≥ 32 ok runs, ≥ 930 two-second windows, ≥ 90% of set-A configs, ≥ 8 test runs |
+| realism (P1) | ≥ 8 ok runs (a YouTube block is retried, then recorded as a gap) |
+| timing (P1) | every ok P1 traffic run `timing_valid` |
 | each set-B combo | ≥ 3 ok runs, each with ≥ 1 observed CHILD rekey |
 | each edge case | ≥ 3 ok runs with matching observation |
 | mid-stream (ESP-only) captures | ≥ 15% of traffic runs |
@@ -501,11 +562,14 @@ carry ESP are recorded separately (`observed.windows_2s.esp_active`).
 | test split | every app class and edge case present in test, with ≥ 8 test runs per app class |
 | each set-A config (P0) | ≥ 3 ok tunnels (its traffic tunnel + 2 short tunnels) |
 
+The P1 window minimums keep P0's share (1,400 of the 32 × 45 windows a set of 90 s runs
+can give) for 60 s runs: 230 of 8 × 30, 930 of 32 × 30.
+
 `coverage.py`:
 - prints a table of target vs actual
 - lists the exact missing runs
-- writes `coverage.md`
-- exits non-zero if P0 targets are unmet
+- writes its tier's section of `coverage.md` (`--tier <t>`; the other sections are kept)
+- exits non-zero if a target of the given tier is unmet (without `--tier`: any P0 target)
 
 After each tier, run `capture/run.py --fill-gaps` to re-queue only what's missing.
 
@@ -612,7 +676,7 @@ merge with `tools/merge.py`. Then `coverage.py` must pass P0.
 ## 11. Capture runbook (how a tier is captured end to end)
 
 This is the procedure P0 was captured with (P0 used 3 labs; since the adversarial
-validation failed, use `--labs 1`). Use it for P1 and P2.
+validation failed, use `--labs 1`), with the P1 changes. Use it for P1 and P2.
 
 ### 11.1 Once per account
 
@@ -623,8 +687,13 @@ validation failed, use `--labs 1`). Use it for P1 and P2.
   A shorter timeout stops the codespace mid-batch; P0 lost three resumes to it.
 - A **classic** token with the `codespace` scope as the Codespaces secret `GHCR_TOKEN`
   (it also needs `write:packages` to publish images). Never paste tokens into chat or
-  files; `lab/images.sh` logs in with a throwaway docker config.
+  files; `lab/images.sh` logs in with a throwaway docker config. With package access
+  granted to the account, the codespace's own credential pulls the images.
 - One account runs at most **2 codespaces at a time**, all on the same quota.
+- A codespace created from an older commit lacks `gh`: `sudo apt-get install -y gh`.
+  If its creation-time bootstrap ran before package access existed, it may hold local
+  images or media from the old fallback: `bash lab/images.sh pull && bash
+  lab/images.sh pull-media`, then check every digest against `lab/images.lock`.
 
 ### 11.2 Plan
 
@@ -633,7 +702,8 @@ python3 capture/run.py --tier p1 --labs 1 --slice 1/2 --dry-run   # every shard 
 ```
 
 Check: every shard within 15% of the others, both modes and all wire shapes in each,
-total core-hours within quota. Ask the owner before anything over 2 hours.
+total core-hours within quota, and the same `plan:` line (seed, design, plan, images) in
+every slice. Ask the owner before anything over 2 hours.
 
 ### 11.3 Shard codespaces (from the maintainer codespace)
 
@@ -653,8 +723,11 @@ GH_TOKEN="$GHCR_TOKEN" gh codespace stop -c <name>        # until the batch star
 
 Remote commands: avoid process patterns that match their own command line
 (`pgrep -f "[c]apture/run[.]py"`, not `pkill -f "python3 capture/run.py"`: the ssh
-shell's command contains the same text and kills itself). `gh` is not installed in a
-shard: copy files with `gh codespace cp -e 'remote:<path>' .` from the maintainer.
+shell's command contains the same text and kills itself). Copy files with
+`gh codespace cp -e 'remote:<path>' .` from the maintainer. A shard created since the
+P1 handoff has `gh` with its own repository token (release upload and download).
+Pull code fixes into a running shard only between runs, and never over its
+`dataset/manifest.jsonl`: check out the changed code files, not the manifest.
 
 ### 11.4 Launch
 
@@ -690,15 +763,20 @@ once, then starts one worker per lab. Logs: `dataset/raw/_logs/<tier>-<stamp>.lo
 ### 11.6 Finish, back up, merge
 
 1. Every slice: `--status` prints COMPLETE.
-2. Every slice: `python3 tools/export.py --tier <t> --slice i/n`.
-3. Draft release `<t>-data` (`gh release create <t>-data --draft`), upload each archive
-   and its `.sha256` (copy a shard's archive to the maintainer first), then download
-   again and `sha256sum -c` before anything is deleted.
-4. Merge only the tier's manifest lines of every slice with `tools/merge.py` (it rejects
-   a different plan, seed, design or image set), write `dataset/manifest.jsonl`, run
-   `tools/coverage.py --tier <t>` (exit 0), update `dataset/README.md`, commit, push.
-5. Stop the shard codespaces; delete them once the owner agrees (their data is in the
-   release).
+2. Every slice: `python3 tools/export.py --tier <t> --slice i/n` (on its own codespace).
+3. Draft release per slice, `<t>-slice<i>` (`gh release create <t>-slice<i> --draft`),
+   with the archive and its `.sha256`; download again and `sha256sum -c` before
+   anything is deleted. Then stop that shard codespace.
+4. Merge only the tier's manifest lines of every slice:
+   `python3 tools/merge.py --tier <t> dataset/manifest.jsonl <slice manifests>` (it
+   rejects a different plan, seed, design or image set, and keeps the other tiers'
+   lines as they are; without `--tier` the earlier tiers' older design fingerprint is
+   rejected). Run `tools/coverage.py --tier <t>`, update `dataset/README.md`, commit,
+   push.
+5. The merged tier: unpack every slice archive into `dataset/raw`, `tools/export.py
+   --tier <t>`, and upload it as the draft release `<t>-data`, verified the same way.
+6. Stop the shard codespaces; delete them once the owner agrees (their data is in the
+   releases).
 
 ---
 
@@ -717,6 +795,9 @@ Pinned images from ghcr, kernel XFRM, netem available.
   p 0.005; video 0.787, voip 0.678, web 0.696; top features are inter-arrival times).
   P0 timing features are biased; sizes and IKE content are not. P1 onward: `--labs 1`.
   Open: recapture the 192 P0 traffic runs serially (about 6 h, 24 core-hours).
+- The 192 P0 traffic runs carry a manifest annotation `timing_valid: false`
+  (`tools/annotate.py`, appended at the P1 handoff; the attempts and the `p0-data`
+  release are unchanged).
 - Set A reduced to 32 configs (4 ESP wire shapes; AES key size drawn per tunnel), tunnel
   reuse per config, 2 extra short tunnels per config, 25% test split per tunnel
   stratified by shape x mode (8 test tunnels, 8 test runs per app).
