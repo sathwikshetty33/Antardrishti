@@ -38,6 +38,19 @@ keys. Plaintext captures and keys exist **only** in the dataset, as ground truth
 - Docker's image store survives a codespace restart only when the codespace runs this
   repo's devcontainer (docker-in-docker keeps `/var/lib/docker` on a volume). Otherwise
   every restart costs an image pull or rebuild.
+- After a restart Docker can switch between two containerd stores (`/var/lib/containerd`
+  and `/var/lib/docker/containerd/daemon`); the unused one keeps every old image and
+  silently fills the disk. `lab/cleanup.sh` removes only the store no running containerd
+  uses (and stale containers and build cache); bootstrap and every batch run it, and a
+  batch refuses to start with less than 5 GB free.
+- One personal account can run **2 codespaces at a time**. A maintainer can drive a
+  second codespace from the first with `gh codespace create / ssh / stop` and a classic
+  token with the `codespace` scope (the devcontainer includes an SSH server for this).
+  Codespaces on one account share that account's quota: they make a tier finish
+  sooner, not cheaper.
+- Package read access for codespaces is granted per package (Package settings, Manage
+  Codespaces access, add this repository) and takes effect when a codespace starts:
+  restart an existing codespace after granting it.
 - The idle timeout stops codespaces, so the orchestrator must be **resumable**. It skips
   runs already marked `ok` in the manifest. Tell the user to raise the idle timeout to
   the maximum in their GitHub settings.
@@ -105,6 +118,28 @@ dataset/
 **Never commit raw captures to git.** Add `dataset/raw/` and `dataset/external/` to
 `.gitignore`. Commit `manifest.jsonl`, `coverage.md`, and `README.md` only. Export data
 with `tools/export.py` (GitHub release assets, Kaggle, or Hugging Face).
+
+**Back up every finished tier or slice before its codespace can go away.** A codespace
+is deleted after its retention period, and quota can run out, so the captures must not
+live only in a codespace:
+
+1. `capture/run.py --tier <t> --slice i/n --status` must print COMPLETE.
+2. `tools/export.py --tier <t> --slice i/n` packs the ok runs (checked against their
+   meta.json checksums) plus their manifest lines into
+   `dataset/export/<t>-slice-i-of-n-<commit>.tar.zst` and a `.sha256`.
+3. Upload both files as assets of a **draft** GitHub release named `<t>-data` on
+   `sathwikshetty33/SIH` (`gh release create <t>-data --draft`, then
+   `gh release upload <t>-data <files>`). The repository is public, but a draft
+   release is visible only to its collaborators, so the data stays private until the
+   owner decides to publish. Assets must stay under GitHub's 2 GB per-file limit.
+4. Merge the slices' manifests (`tools/merge.py`) and commit `dataset/manifest.jsonl`,
+   `dataset/coverage.md` and `dataset/README.md` to `main`, and push.
+5. Only after the upload is verified (download, `sha256sum -c`) may a shard codespace
+   be deleted.
+
+To get the data back anywhere: `gh release download <t>-data -R sathwikshetty33/SIH`,
+then `sha256sum -c *.sha256` and unpack with `zstd -dc <file> | tar -x`. The adversarial
+validation tiers (`avs`, `avp`) are backed up the same way as `av-data`.
 
 ---
 
