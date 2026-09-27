@@ -1042,6 +1042,8 @@ def main():
     ap.add_argument("--resume", action="store_true", help="skip runs already ok (always on)")
     ap.add_argument("--fill-gaps", action="store_true", help="also retry exhausted runs, add edge reps")
     ap.add_argument("--retry", action="store_true", help="retry runs that used up their attempts (no new reps)")
+    ap.add_argument("--redo", action="store_true",
+                    help="capture the selected runs again even if ok (new attempts; the latest ok counts)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--rep", type=int, nargs="*", help="only these reps")
@@ -1062,8 +1064,8 @@ def main():
         runs += gaps(runs, last)
     if sn > 1:
         runs = plan.slice_units(runs, si, sn)
-    todo = [r for r in runs if last.get(r["run_id"]) != "ok" and not r.get("skip")
-            and (args.fill_gaps or args.retry or tries[r["run_id"]] < attempts)]
+    todo = [r for r in runs if (args.redo or last.get(r["run_id"]) != "ok") and not r.get("skip")
+            and (args.fill_gaps or args.retry or args.redo or tries[r["run_id"]] < attempts)]
     if args.list:
         for r in runs:
             print(r["run_id"], r["split"], r["cls"], r.get("netem"), r.get("capture_start"),
@@ -1090,6 +1092,11 @@ def main():
         sys.exit("estimate over 2 hours: confirm with the user, then rerun with --yes")
     if not todo:
         return
+    # docker hygiene first (a restart can leave a whole unused image store behind)
+    log(sh(f"bash {root}/lab/cleanup.sh", check=False, timeout=1800)[1].splitlines()[-1:])
+    free = shutil.disk_usage(root).free / 1e9
+    if free < 5:
+        sys.exit(f"only {free:.1f} GB free on /workspaces: run lab/cleanup.sh, export and prune old runs first")
     if not args.no_build:
         # pinned registry images when lab/images.lock exists (the same digests on
         # every shard), else a local build

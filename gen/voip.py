@@ -23,8 +23,7 @@ audio_source aufile,{wav}
 audio_alert aufile,/tmp/bs/alert.wav
 audio_level no
 module_path /usr/lib/baresip/modules
-module g711.so
-module opus.so
+{codec_module}
 module aufile.so
 module_app account.so
 module_app menu.so
@@ -47,7 +46,10 @@ def main():
     dev = src[src.index("dev") + 1]
     src = src[src.index("src") + 1]
     listen = f"[{src}]:5070" if a.fam == "v6" else f"{src}:5070"
-    open("/tmp/bs/config", "w").write(conf.format(listen=listen, wav=wav, dev=dev))
+    open("/tmp/bs/config", "w").write(conf.format(listen=listen, wav=wav, dev=dev,
+                    # only the chosen codec is loaded, so it is the only one offered: with
+                    # both loaded, baresip offers pcmu first and a 48 kHz source then fails
+                    codec_module="module opus.so" if codec == "opus" else "module g711.so"))
     codecs = "opus/48000/2" if codec == "opus" else "PCMU/8000/1"
     open("/tmp/bs/accounts", "w").write(
         f"<sip:lab@{a.host};transport=udp>;auth_pass=voip-throwaway;"

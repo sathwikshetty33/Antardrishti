@@ -15,6 +15,7 @@ python3 -m pip install -q -r lab/requirements.txt
 
 mkdir -p dataset/raw dataset/external/whatsapp dataset/external/public
 
+bash lab/cleanup.sh || true
 # lab images: the pinned digests from lab/images.lock (same on every shard), else a local build
 bash lab/images.sh pull || bash lab/images.sh build
 # media: the pinned snapshot, else fetch + encode it here (slow, and a later crawl may differ)
