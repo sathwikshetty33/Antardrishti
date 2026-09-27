@@ -64,3 +64,70 @@ ok runs: 370 (lab 370, internet 0, replayed 0)
 
 - none
 <!-- p0:end -->
+
+<!-- p1:start -->
+## P1
+
+ok runs: 192 (lab 184, internet 8, replayed 0)
+
+| level | target | minimum | actual | met |
+|---|---|---|---|---|
+| p1 | anchor voip: ok runs | >= 8 | 8 | yes |
+| p1 | anchor voip: 2 s windows | >= 230 | 236 | yes |
+| p1 | anchor voip: a8 configs covered | all 8 | 8/8 | yes |
+| p1 | anchor voip: test runs | >= 2 | 2 | yes |
+| p1 | anchor video: ok runs | >= 8 | 8 | yes |
+| p1 | anchor video: 2 s windows | >= 230 | 240 | yes |
+| p1 | anchor video: a8 configs covered | all 8 | 8/8 | yes |
+| p1 | anchor video: test runs | >= 2 | 2 | yes |
+| p1 | anchor web: ok runs | >= 8 | 8 | yes |
+| p1 | anchor web: 2 s windows | >= 230 | 239 | yes |
+| p1 | anchor web: a8 configs covered | all 8 | 8/8 | yes |
+| p1 | anchor web: test runs | >= 2 | 2 | yes |
+| p1 | anchor email: ok runs | >= 8 | 8 | yes |
+| p1 | anchor email: 2 s windows | >= 230 | 238 | yes |
+| p1 | anchor email: a8 configs covered | all 8 | 8/8 | yes |
+| p1 | anchor email: test runs | >= 2 | 2 | yes |
+| p1 | anchor icmp: ok runs | >= 8 | 8 | yes |
+| p1 | anchor icmp: 2 s windows | >= 230 | 240 | yes |
+| p1 | anchor icmp: a8 configs covered | all 8 | 8/8 | yes |
+| p1 | anchor icmp: test runs | >= 2 | 2 | yes |
+| p1 | anchor bulk: ok runs | >= 8 | 8 | yes |
+| p1 | anchor bulk: 2 s windows | >= 230 | 240 | yes |
+| p1 | anchor bulk: a8 configs covered | all 8 | 8/8 | yes |
+| p1 | anchor bulk: test runs | >= 2 | 2 | yes |
+| p1 | mixture voip_video | >= 8 ok, in test | 8 ok, 2 test | yes |
+| p1 | mixture voip_web | >= 8 ok, in test | 8 ok, 2 test | yes |
+| p1 | mixture video_web | >= 8 ok, in test | 8 ok, 2 test | yes |
+| p1 | mixture web_email | >= 8 ok, in test | 8 ok, 2 test | yes |
+| p1 | mixture voip_bulk | >= 8 ok, in test | 8 ok, 2 test | yes |
+| p1 | mixture video_bulk | >= 8 ok, in test | 8 ok, 2 test | yes |
+| p1 | mixture icmp_web | >= 8 ok, in test | 8 ok, 2 test | yes |
+| p1 | mixture chat_web | >= 8 ok, in test | 8 ok, 2 test | yes |
+| p1 | mixture email_bulk | >= 8 ok, in test | 8 ok, 2 test | yes |
+| p1 | mixture voip_video_web | >= 8 ok, in test | 8 ok, 2 test | yes |
+| p1 | app chat: ok runs | >= 32 | 32 | yes |
+| p1 | app chat: 2 s windows | >= 930 | 929 | **no** |
+| p1 | app chat: set-A configs covered | >= 90% of 32 | 32/32 | yes |
+| p1 | app chat: test runs | >= 8 | 8 | yes |
+| p1 | realism (internet): ok runs | >= 8 | 8 | yes |
+| p1 | traffic runs captured alone (timing_valid) | all | 168/168 | yes |
+| p1 | edge e19 ah | >= 3 ok, in test | 3 ok (0 mismatch), 1 test | yes |
+| p1 | edge e20 replay window off | >= 3 ok, in test | 3 ok (0 mismatch), 1 test | yes |
+| p1 | edge e21 esn | >= 3 ok, in test | 3 ok (0 mismatch), 1 test | yes |
+| p1 | edge e22 ike fragmentation | >= 3 ok, in test | 3 ok (0 mismatch), 1 test | yes |
+| p1 | edge e23 multiple child sas | >= 3 ok, in test | 3 ok (0 mismatch), 1 test | yes |
+| p1 | edge e24 mixed families | >= 3 ok, in test | 3 ok (0 mismatch), 1 test | yes |
+| p1 | edge e25 ip fragmentation | >= 3 ok, in test | 3 ok (0 mismatch), 1 test | yes |
+| p1 | edge e26 replay attempt | >= 3 ok, in test | 3 ok (0 mismatch), 1 test | yes |
+| p1 | mid-stream (esp-only) captures | >= 15% of traffic runs | 112/168 = 67% | yes |
+| p1 | netem broadband | >= 15% of runs | 47/168 = 28% | yes |
+| p1 | netem congested | >= 15% of runs | 45/168 = 27% | yes |
+| p1 | netem lan | >= 15% of runs | 44/168 = 26% | yes |
+| p1 | netem mobile | >= 15% of runs | 32/168 = 19% | yes |
+
+### Gaps
+
+- whatsapp whatsapp: no pcaps in dataset/external/whatsapp
+- youtube: blocked in 8 of 8 ok runs (recorded, never worked around)
+<!-- p1:end -->

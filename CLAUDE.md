@@ -4,7 +4,7 @@ Phase 1 of an AI-driven IPsec analysis platform (SIH 2026): a lab that builds a
 labelled IPsec traffic dataset.
 
 Read before doing anything:
-- `dataset/CLAUDE.md`: the specification. §11 is the capture runbook, §12 the P0 record.
+- `dataset/CLAUDE.md`: the specification. §11 is the capture runbook, §12 the P0 and P1 records.
 - `HANDOFF.md`: current state and what a fresh session gets wrong.
 - `SHARDS.md`: running a slice of a tier; `dataset/README.md`: the datasheet.
 

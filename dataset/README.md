@@ -99,6 +99,46 @@ traffic runs have their tunnel's IKE setup in another run of the same tunnel (tu
 reuse), linked by `group`.
 <!-- p0:end -->
 
+<!-- p1:start -->
+## P1 collection (2026-09-27)
+
+| | |
+|---|---|
+| ok runs | **192** of 192 planned: 48 anchor (6 single apps x 8 configs), 80 mixtures (10 combos x 8 configs), 32 live chat, 8 realism (internet), 24 edge (e19 to e26 x 3); the 16 WhatsApp replay runs are skipped (no pcaps) |
+| attempts | 208: the 16 extra are realism attempts retried after a YouTube bot check |
+| split | 142 train / 50 test (per tunnel for the traffic stages, per run for edge) |
+| origin | 184 lab, 8 internet (realism), 0 replayed |
+| capture window | 19:43 to 22:29 UTC, 2 codespaces of the account `sathwik34` (4 cores each), one lab per machine (`--labs 1`), `--slice 1/2` and `--slice 2/2`, code `e58bbf9` |
+| timing | every traffic run (168: anchor, mixtures, chat, realism) was captured alone on its machine: `timing_valid` true, concurrency 1, mean machine CPU 10.7%; the 24 edge runs are `timing_valid` false |
+| ipsec | kernel XFRM backend, strongSwan 5.9.13, no unsupported algorithms, netem available |
+| images | the P0 pins from ghcr.io (`lab/images.lock`) and the media snapshot `1d265727`, recorded in every run |
+| netem | lan 44, broadband 47, mobile 32, congested 45 (non-edge runs; edge runs are lan) |
+| capture start | 56 before_tunnel, 112 mid_stream traffic runs (67%) |
+| size | 1.32 GB compressed |
+| storage | draft releases `p1-slice1` and `p1-slice2` (one per slice) and `p1-data` (the merged tier), each archive with its `.sha256`, verified after download |
+| coverage | every P1 target in `coverage.md` is met except live chat's two-second windows: 929 of 930 |
+
+**Design.** P1 follows the approved plan changes (`dataset/CLAUDE.md`, section 5): the
+mixtures on 8 configs (one per ESP wire shape x mode) at 90 s, an anchor set of the six
+single apps on the same 8 configs at 60 s (timing-valid references, since the P0 traffic
+runs were captured with 3 parallel labs), live chat at 60 s, 8 realism runs and the P1
+edge cases. Each slice ran its share in a seeded random order, so run type is not tied to
+time of capture.
+
+**Gaps.** *WhatsApp replay:* `dataset/external/whatsapp/` holds no pcaps, so its 16 runs
+are skipped (never synthesized). *YouTube:* every realism attempt from the codespaces'
+datacenter addresses got YouTube's bot check; after the normal retries each realism run
+keeps its web traffic and records the block (`observed.blocked`), so the realism runs
+hold no YouTube video. *Chat windows:* 929 of the 930 minimum; each chat run is its own
+tunnel, so its capture starts with the IKE setup and the chat begins a second or two in.
+
+**Known limitations.** As in P0: virtual network (veth, netem) inside one host,
+self-hosted services, a fixed mirror of 38 pages. Anchors are 60 s runs (P0 traffic: 90 s).
+Realism runs resolve names with the capturing machine's resolver (the Azure one) through
+the tunnel and gw_b's NAT. In mixtures, web and video both use HTTPS to the same lab
+server, so per-packet app labels there would be ambiguous (the run-level labels are exact).
+<!-- p1:end -->
+
 <!-- advval:start -->
 ## Parallel labs: adversarial validation
 

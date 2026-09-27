@@ -73,7 +73,9 @@ delete them.
    `tools/decrypt_check.py`), to be run on the owner's account because it writes into
    P0 run folders.
 2. Serial recapture of the 192 P0 traffic runs (owner's account, about 24 core-hours).
-3. P1 on the new account, `--labs 1`, after the owner approves the dry-run.
+3. P1: **done** on 2026-09-27 (account `sathwik34`, 2 slices, `--labs 1`): 192/192 runs ok,
+   draft releases `p1-slice1`, `p1-slice2`, `p1-data` (verified). Record in `dataset/CLAUDE.md`
+   §12; open: chat windows 929 of 930, WhatsApp pcaps, YouTube from a non-datacenter address.
 4. For P1 mixtures, web and video both use HTTPS to the same server: the label tool marks
    such flows `ambiguous:web+video`. Fine for P1's run-level labels; per-packet app labels
    in mixtures need a per-app client address (not implemented).

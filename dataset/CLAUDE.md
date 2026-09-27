@@ -644,7 +644,7 @@ merge with `tools/merge.py`. Then `coverage.py` must pass P0.
 
 **Phase 5: labels + spot-check.**
 
-**Phase 6: P1, then P2 if quota allows.** Then `export.py` and the datasheet.
+**Phase 6: P1, then P2 if quota allows.** P1 done 2026-09-27 (section 12). Then `export.py` and the datasheet.
 
 ---
 
@@ -780,7 +780,9 @@ once, then starts one worker per lab. Logs: `dataset/raw/_logs/<tier>-<stamp>.lo
 
 ---
 
-## 12. P0 record (2026-09-27)
+## 12. Tier records
+
+### P0 (2026-09-27)
 
 **Result.** 370 of 370 runs ok, every P0 coverage target met, 1.34 GB, backed up in the
 draft release `p0-data` (two slice archives, checksums verified after download).
@@ -826,3 +828,47 @@ brackets in its resolver rules.
 `tools/labels.py`, `tools/decrypt_check.py`). Serial recapture of the P0 traffic runs.
 P1 with `--labs 1` (about 6h48m, 27 core-hours), then P2 if quota remains. Shard-2 ran
 Docker 29.8.1, the maintainer codespace 29.8.0 (same kernel and images).
+
+### P1 (2026-09-27)
+
+**Result.** 192 of 192 runs ok (the 16 WhatsApp replay runs skipped: no pcaps), every P1
+coverage target met except live chat's two-second windows (929 of 930), 1.32 GB. Backed
+up in the draft releases `p1-slice1` and `p1-slice2` (one per slice) and `p1-data` (the
+merged tier), each archive with its `.sha256`, verified after download. Details in
+`dataset/README.md` (P1 collection) and `dataset/coverage.md` (P1 section).
+
+**How.** A second account (`sathwik34`), which can run 2 codespaces at a time (a third was
+refused: "too many codespaces running"): the maintainer codespace ran `--slice 1/2`,
+`antar-p1-slice2` ran `--slice 2/2`, both with `--labs 1`, 19:43 to 22:29 UTC, at code
+`e58bbf9` (plan `5f0407f286144a36`, design `99777e42f47d44c0`, seed 26002, the P0 image
+pins plus the media digest). Every traffic run (168) is `timing_valid`: concurrency 1 on
+its machine. The slice codespace was deleted once its release was verified and its
+manifest lines were pushed.
+
+**Decisions.**
+- The approved plan changes (section 5): mixtures on the 8 `a8` configs at 90 s, the
+  anchor set at 60 s, live chat at 60 s (window target 930), realism 8 runs, timing
+  validity, the P0 traffic annotation, seeded balanced slices.
+- Parts of P1 that had never run were implemented before the capture, without image
+  changes: the realism tier (live web and YouTube generators, the machine's resolver,
+  gw_a's LAN bypass), e22's big chain, e23's second child SA, e26's replay from the host.
+- A YouTube block fails the attempt so the normal retries run; the last attempt keeps the
+  run and records the block. All 8 realism runs ended blocked.
+- The maintainer codespace had a 30-minute idle timeout, which a running codespace cannot
+  change: with the owner's approval a `gh codespace ssh` session from the slice codespace
+  kept it active (and would have restarted it and relaunched slice 1).
+
+**Incidents during P1, and what was done** (every fix is in `main`):
+
+| incident | effect | fix | runs |
+|---|---|---|---|
+| the account had no read access to the ghcr packages; the creation-time bootstrap built the images and crawled the media locally | capture stopped before it began | the owner granted Read; pinned images and media pulled again and checked line by line; a refused pull now fails instead of building (995c0a6) | - |
+| realism, e22, e23 and e26 had never run: no youtube generator, no internet DNS or LAN bypass, no big chain, no second child, no tcpreplay in the router image and a stale replay capture | these runs would fail or mismatch on every attempt | implemented and retested before the capture (995c0a6, c438314, d045c68) | - |
+| the slice codespace's batch crashed at start: the lab keys were made in a lab container, not yet up on a fresh codespace | no runs | the keys are made in a throwaway gw container (e58bbf9) | - |
+| a relaunch guard matched its own ssh command line | nothing launched | check and launch in separate commands | - |
+| large lan bulk captures (up to 560 MB raw) took 10 to 15 minutes to analyse | slower slices | none needed (P0: up to 784 s) | - |
+
+**Open items.** Chat windows: 929 of 930 (accept, or capture more chat). WhatsApp replay
+once test-phone pcaps exist; YouTube from a non-datacenter address. P0 and P1 labels and
+the decryption spot-check (phase 5). The serial recapture of the P0 traffic runs.
+
