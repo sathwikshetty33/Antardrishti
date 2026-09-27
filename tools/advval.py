@@ -94,7 +94,7 @@ def latest_ok(tier):
     for l in manifest.read_text().splitlines():
         if l.strip():
             m = json.loads(l)
-            if m["tier"] == tier:
+            if m["tier"] == tier and "annotation" not in m:
                 last[m["run_id"]] = m
     return {k: v for k, v in last.items() if v["status"] == "ok" and v["stage"] == "av"}
 

@@ -234,7 +234,7 @@ def ok_runs(tier, ids):
     for l in manifest.read_text().splitlines():
         if l.strip():
             m = json.loads(l)
-            if m["tier"] == tier:
+            if m["tier"] == tier and "annotation" not in m:
                 last[m["run_id"]] = m
     rs = sorted(r for r, m in last.items() if m["status"] == "ok")
     return [r for r in rs if not ids or r in ids]

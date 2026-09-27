@@ -33,15 +33,19 @@ def main():
     tag = a.tier
     if a.slice:
         i, n = (int(x) for x in a.slice.split("/"))
-        runs = plan.slice_units(runs, i, n)
+        runs = plan.deal(runs, i, n) if a.tier not in plan.legacy else plan.slice_units(runs, i, n)
         tag += f"-slice-{i}-of-{n}"
     want = {r["run_id"] for r in runs}
+    base = {r["run_id"] for r in plan.build(a.tier)}
     last, lines = {}, []
     for l in manifest.read_text().splitlines():
         if l.strip():
             m = json.loads(l)
-            if m["tier"] == a.tier and (m["run_id"] in want or (m.get("edge_case") and not a.slice)):
-                last[m["run_id"]] = m["status"]
+            # extra edge reps (--fill-gaps) are not in the plan: a slice packs the ones it captured
+            extra = m.get("edge_case") and m["run_id"] not in base and (not a.slice or (raw / m["run_id"]).exists())
+            if m["tier"] == a.tier and (m["run_id"] in want or extra):
+                if "annotation" not in m:
+                    last[m["run_id"]] = m["status"]
                 lines.append(l)
     ok = sorted(r for r, s in last.items() if s == "ok")
     bad = [(r, checkmeta.check(raw / r)) for r in ok]
