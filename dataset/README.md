@@ -29,3 +29,19 @@ Probed by `lab/preflight.py` on 2026-09-27.
 | swanctl --list-algs | ok | encryption:15, integrity:15, aead:10, hasher:12, prf:10, xof:8, kdf:2, drbg:7, dh:27, rng:3, nonce-gen:1 |
 | kernel xfrm algorithms | ok | unsupported: none |
 <!-- env:end -->
+
+<!-- notes:start -->
+## Notes on collection
+
+- **Replayed chat is tunnel mode only.** WhatsApp (and public pcap) replay injects
+  captured frames with `tcpreplay`, and raw frames bypass the kernel's XFRM. Replay can
+  therefore only enter IPsec by being forwarded through `gw_a`, i.e. in tunnel mode,
+  with IPv4 inner traffic (the captures are IPv4). Replayed runs are marked
+  `replayed: true`, are never the only test source, and are not stateful (no real
+  endpoints answer them).
+- **Live chat (XMPP) runs in both modes.** The live chat class covers tunnel and
+  transport mode, both families, with and without NAT-T.
+- **Tunnels are reused** within a set-A config: the first run of a tunnel captures its
+  IKE setup (`before_tunnel`), later runs start on the established tunnel
+  (`mid_stream`). Splits are per tunnel, so train and test never share a tunnel.
+<!-- notes:end -->
