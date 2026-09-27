@@ -55,7 +55,8 @@ case "${1:-pull}" in
     for i in $imgs; do
       docker tag "antar/$i" "$base-$i:$tag"
       dk push -q "$base-$i:$tag" >/dev/null
-      d=$(docker image inspect -f '{{index .RepoDigests 0}}' "$base-$i:$tag")
+      # the registry digest, not a local name for the same image
+      d=$(docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$base-$i:$tag" | grep "^$base-$i@" | head -1)
       echo "$i $d" >> "$lock.tmp"
       echo "pushed $d"
     done
@@ -64,7 +65,10 @@ case "${1:-pull}" in
     if [ ! -s "$lock" ]; then echo "no $lock: building locally"; build; exit 0; fi
     login 2>/dev/null || true
     grep -v '^media ' "$lock" | while read -r i d; do
-      if dk pull -q "$d" >/dev/null 2>&1; then
+      if docker image inspect "$d" >/dev/null 2>&1; then
+        docker tag "$d" "antar/$i"
+        echo "present $d"
+      elif dk pull -q "$d" >/dev/null 2>&1; then
         docker tag "$d" "antar/$i"
         echo "pulled $d"
       else
@@ -85,7 +89,7 @@ EOD
     docker build -q --label "org.opencontainers.image.source=$src" -t "$base-media:$tag" -f media/Dockerfile media >/dev/null
     rm -f media/Dockerfile media/ATTRIBUTION.md
     dk push -q "$base-media:$tag" >/dev/null
-    d=$(docker image inspect -f '{{index .RepoDigests 0}}' "$base-media:$tag")
+    d=$(docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$base-media:$tag" | grep "^$base-media@" | head -1)
     grep -v '^media ' "$lock" > "$lock.tmp" 2>/dev/null || true
     echo "media $d" >> "$lock.tmp" && mv "$lock.tmp" "$lock"
     echo "pushed $d" ;;

@@ -466,5 +466,6 @@ def versions():
     # registry digests when the images came from ghcr (lab/images.sh pull); empty for local builds
     for img in ("gw", "router", "host", "services", "noise"):
         _, d = sh(f"docker image inspect -f '{{{{join .RepoDigests \" \"}}}}' antar/{img}", check=False)
-        out[f"digest_{img}"] = d.strip()
+        reg = [x for x in d.split() if x.startswith("ghcr.io/")]
+        out[f"digest_{img}"] = reg[0] if reg else ""
     return out
