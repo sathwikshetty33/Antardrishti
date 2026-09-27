@@ -1,0 +1,131 @@
+# antardrishti lab topology
+#
+# host_a -- lan_a -- gw_a -- wan_a -- router -- wan_b -- gw_b -- lan_b -- host_b
+#                              |                  |         \
+#                           noise_a            noise_b       inet (nat, realism tier only)
+#
+# cli_gw / svc_gw share the network namespace of gw_a / gw_b and carry the
+# same client / service images as host_a / host_b, for transport mode.
+# docker owns .1 / ::1 of every subnet (bridge address), so lab hosts avoid it.
+# routes are set by lab/topo.py after `up`, not by docker.
+name: antar
+
+x-lab: &lab
+  privileged: true
+  cap_add: [NET_ADMIN]
+  init: true
+  restart: "no"
+  sysctls:
+    net.ipv6.conf.all.disable_ipv6: 0
+    net.ipv4.ip_forward: 1
+    net.ipv6.conf.all.forwarding: 1
+
+services:
+  gw_a:
+    <<: *lab
+    image: antar/gw
+    build: images/gw
+    container_name: antar_gw_a
+    hostname: gw-a
+    networks:
+      lan_a: {ipv4_address: 10.1.0.254, ipv6_address: "fd00:1::254"}
+      wan_a: {ipv4_address: 172.31.1.10, ipv6_address: "fd00:a::10"}
+
+  gw_b:
+    <<: *lab
+    image: antar/gw
+    container_name: antar_gw_b
+    hostname: gw-b
+    depends_on: [gw_a]
+    networks:
+      lan_b: {ipv4_address: 10.2.0.254, ipv6_address: "fd00:2::254"}
+      wan_b: {ipv4_address: 172.31.2.10, ipv6_address: "fd00:b::10"}
+      inet: {}
+
+  router:
+    <<: *lab
+    image: antar/router
+    build: images/router
+    container_name: antar_router
+    hostname: router
+    networks:
+      wan_a: {ipv4_address: 172.31.1.254, ipv6_address: "fd00:a::254"}
+      wan_b: {ipv4_address: 172.31.2.254, ipv6_address: "fd00:b::254"}
+
+  host_a:
+    <<: *lab
+    image: antar/host
+    build: images/host
+    container_name: antar_host_a
+    hostname: host-a
+    shm_size: 1gb
+    volumes: ["../gen:/gen:ro", "../dataset/external:/external:ro"]
+    networks:
+      lan_a: {ipv4_address: 10.1.0.10, ipv6_address: "fd00:1::10"}
+
+  host_b:
+    <<: *lab
+    image: antar/services
+    build: images/services
+    container_name: antar_host_b
+    hostname: host-b
+    volumes: ["../gen:/gen:ro", "../dataset/external:/external:ro"]
+    networks:
+      lan_b: {ipv4_address: 10.2.0.10, ipv6_address: "fd00:2::10"}
+
+  cli_gw:
+    <<: *lab
+    image: antar/host
+    container_name: antar_cli_gw
+    shm_size: 1gb
+    volumes: ["../gen:/gen:ro", "../dataset/external:/external:ro"]
+    network_mode: "service:gw_a"
+    sysctls: {}
+    depends_on: [gw_a]
+
+  svc_gw:
+    <<: *lab
+    image: antar/services
+    container_name: antar_svc_gw
+    volumes: ["../gen:/gen:ro", "../dataset/external:/external:ro"]
+    network_mode: "service:gw_b"
+    sysctls: {}
+    depends_on: [gw_b]
+
+  noise_a:
+    <<: *lab
+    image: antar/noise
+    build: images/noise
+    container_name: antar_noise_a
+    hostname: noise-a
+    networks:
+      wan_a: {ipv4_address: 172.31.1.20, ipv6_address: "fd00:a::20"}
+
+  noise_b:
+    <<: *lab
+    image: antar/noise
+    container_name: antar_noise_b
+    hostname: noise-b
+    command: ["/serve.sh"]
+    networks:
+      wan_b: {ipv4_address: 172.31.2.20, ipv6_address: "fd00:b::20"}
+
+networks:
+  lan_a:
+    internal: true
+    enable_ipv6: true
+    ipam: {config: [{subnet: 10.1.0.0/24}, {subnet: "fd00:1::/64"}]}
+  wan_a:
+    internal: true
+    enable_ipv6: true
+    ipam: {config: [{subnet: 172.31.1.0/24}, {subnet: "fd00:a::/64"}]}
+  wan_b:
+    internal: true
+    enable_ipv6: true
+    ipam: {config: [{subnet: 172.31.2.0/24}, {subnet: "fd00:b::/64"}]}
+  lan_b:
+    internal: true
+    enable_ipv6: true
+    ipam: {config: [{subnet: 10.2.0.0/24}, {subnet: "fd00:2::/64"}]}
+  inet:
+    ipam: {config: [{subnet: 172.31.9.0/24}]}

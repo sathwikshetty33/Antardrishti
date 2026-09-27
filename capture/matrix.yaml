@@ -1,0 +1,88 @@
+# experiment design (CLAUDE.md section 5). the plan built from this file with a
+# given tier seed is fully deterministic.
+
+seeds: {p0: 26001, p1: 26002, p2: 26003}
+
+# per-run fixed cost estimate: charon restart, capture setup, zstd, validation
+overhead_s: 30
+
+defaults:
+  ike_version: 2
+  inner_family: same        # same as outer_family unless overridden
+  esn: false
+  replay_window: 32
+  ike_rekey_s: 14400
+  child_rekey_s: 3600
+  dpd_delay_s: 0
+  fragmentation: "yes"
+  aggressive: false
+
+# size-relevant cross: 2 x 6 x 2 x 2 = 48 configs
+set_a:
+  mode: [tunnel, transport]
+  esp: [aes128gcm16, aes256gcm16, aes128-sha256, aes256-sha256, aes128-sha1, aes256-sha384]
+  outer_family: [v4, v6]
+  encap: [false, true]
+  # free diversity, seeded per run and recorded
+  sample:
+    dh: [ecp256, ecp384, curve25519, modp2048, modp3072]
+    pfs: [true, false]
+    auth: [psk, cert]
+    cert_key: [rsa, ecdsa]
+    ike_enc: [aes256-sha256, aes128-sha256, aes256-sha384, aes256gcm16-prfsha384]
+
+# handshake cross: 5 x 2 x 2 = 20 configs, ikev2 only
+set_b:
+  dh: [modp1024, modp2048, ecp256, ecp384, curve25519]
+  pfs: [true, false]
+  auth: [psk, cert]
+  cert_key_by_rep: [rsa, ecdsa, rsa]
+  child_rekey_s: [40, 60]
+  ike_rekey_s: [90, 120]
+  sample:
+    esp: [aes128gcm16, aes256gcm16, aes128-sha256, aes256-sha256]
+    outer_family: [v4, v6]
+    ike_enc: [aes256-sha256, aes128-sha256]
+
+apps: [voip, video, web, email, icmp, bulk]
+
+randomize:
+  mid_stream: 0.3            # else before_tunnel
+  mid_stream_delay_s: [20, 60]
+  noise: 0.5
+
+tiers:
+  p0:
+    - {stage: traffic, set: a, apps: [voip, video, web, email, icmp, bulk], reps: 1, duration_s: 90}
+    - {stage: handshake, set: b, apps: [icmp, web_light], reps: 3, duration_s: 150}
+    - {stage: edge, level: p0, reps: 3}
+  p1:
+    - stage: mixtures
+      set: a12
+      duration_s: 120
+      reps: 1
+      combos:
+        - [voip, video]
+        - [voip, web]
+        - [video, web]
+        - [web, email]
+        - [voip, bulk]
+        - [video, bulk]
+        - [icmp, web]
+        - [chat, web]
+        - [email, bulk]
+        - [voip, video, web]
+    - {stage: chat, set: a, apps: [chat], reps: 1, duration_s: 90}
+    - {stage: whatsapp, set: a12, apps: [whatsapp], reps: 1, duration_s: 90, needs: external/whatsapp}
+    - {stage: realism, set: inet8, apps: [web, youtube], reps: 2, duration_s: 90}
+    - {stage: edge, level: p1, reps: 3}
+  p2:
+    - {stage: traffic, set: a, apps: [voip, video, web, email, icmp, bulk], reps: 1, rep_offset: 1, duration_s: 90}
+    - {stage: public, set: a, apps: [public], reps: 1, duration_s: 90, needs: external/public}
+
+# subsets of set a
+subsets:
+  # both modes, gcm + cbc, v4 + v6 -> 2 x 3 x 2 = 12
+  a12: {mode: [tunnel, transport], esp: [aes128gcm16, aes256-sha256, aes128-sha1], outer_family: [v4, v6], encap: [false]}
+  # tunnel to the real internet, 4 esp x 2 outer families = 8
+  inet8: {mode: [tunnel], esp: [aes128gcm16, aes256gcm16, aes256-sha256, aes128-sha1], outer_family: [v4, v6], encap: [false], inner_family: v4}

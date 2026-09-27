@@ -1,0 +1,214 @@
+# edge cases (CLAUDE.md section 6).
+#
+# config:   overrides merged into the base config (both gateways)
+# b:        overrides for the responder only (conn/children/psk/charon)
+# a:        overrides for the initiator only
+# setup:    named actions implemented by capture/run.py
+# variants: config overrides cycled by rep (rep 1 -> [0], rep 2 -> [1], ...)
+# expect:   checked automatically against the capture and charon logs.
+#           any failed check -> status: mismatch (kept, not counted)
+# needs:    algorithms that must appear in `swanctl --list-algs`, else the
+#           case is recorded as unsupported in coverage (never faked)
+#
+# base config for every edge case: tunnel, v4/v4, ikev2, psk,
+# aes256-sha256-ecp256 / aes128gcm16-ecp256, icmp traffic, lan, no noise.
+
+p0:
+  e01:
+    scenario: ike no response
+    duration_s: 40
+    apps: [icmp]
+    setup: [drop_ike_from_responder]
+    expect: {established: false, esp: false, min_init_requests: 3, responder_spi_zero: true}
+
+  e02:
+    scenario: half handshake (init only)
+    duration_s: 45
+    apps: [icmp]
+    setup: [drop_ike_auth]
+    expect: {established: false, esp: false, exchanges: [IKE_SA_INIT], init_response: true, min_auth_requests: 2}
+
+  e03:
+    scenario: no proposal chosen
+    duration_s: 25
+    apps: [icmp]
+    b: {conn: {proposals: "aes128-sha1-modp3072"}}
+    config: {ike_proposal: "aes256-sha512-ecp384"}
+    expect: {established: false, esp: false, notifies: [NO_PROPOSAL_CHOSEN]}
+
+  e04:
+    scenario: wrong dh guess
+    duration_s: 30
+    apps: [icmp]
+    config: {ike_proposal: "aes256-sha256-ecp256-modp2048"}
+    b: {conn: {proposals: "aes256-sha256-modp2048"}}
+    expect: {established: true, esp: true, notifies: [INVALID_KE_PAYLOAD], min_init_requests: 2}
+
+  e05:
+    scenario: auth failure
+    duration_s: 25
+    apps: [icmp]
+    b: {psk: "wrong-psk-for-e05"}
+    expect: {established: false, esp: false, exchanges: [IKE_SA_INIT, IKE_AUTH], notifies: [AUTHENTICATION_FAILED]}
+
+  e06:
+    scenario: cookie challenge
+    duration_s: 30
+    apps: [icmp]
+    b: {charon: {cookie_threshold: 1}}
+    setup: [half_open_flood]
+    expect: {established: true, notifies: [COOKIE], min_init_requests: 2}
+
+  e07:
+    scenario: mid-stream only
+    duration_s: 60
+    apps: [icmp, web_light]
+    setup: [capture_after_60]
+    expect: {esp: true, no_ike: true, esp_first_seq_min: 100}
+
+  e08:
+    scenario: rekey only
+    duration_s: 45
+    apps: [icmp]
+    config: {child_rekey_s: 50}
+    setup: [capture_after_25]
+    expect: {esp: true, exchanges: [CREATE_CHILD_SA], no_exchanges: [IKE_SA_INIT], spi_change: true}
+
+  e09:
+    scenario: ike sa rekey
+    duration_s: 70
+    apps: [icmp]
+    config: {ike_rekey_s: 40}
+    expect: {established: true, exchanges: [CREATE_CHILD_SA], ike_spi_change: true}
+
+  e10:
+    scenario: idle tunnel with dpd
+    duration_s: 60
+    apps: []
+    config: {dpd_delay_s: 10}
+    setup: [capture_after_5]
+    expect: {esp: false, exchanges: [INFORMATIONAL], no_exchanges: [IKE_SA_INIT, IKE_AUTH]}
+
+  e11:
+    scenario: teardown
+    duration_s: 60
+    apps: [icmp]
+    setup: [terminate_at_35]
+    expect: {established: true, esp: true, exchanges: [INFORMATIONAL], delete: true, esp_stops: true}
+
+  e12:
+    scenario: forced nat-t
+    duration_s: 60
+    apps: [icmp]
+    config: {encap: true}
+    a: {charon: {keep_alive: 5}}
+    b: {charon: {keep_alive: 5}}
+    expect: {established: true, udp4500_esp: true, non_esp_marker: true, keepalives: true}
+
+  e13:
+    scenario: ikev1 main mode
+    duration_s: 40
+    apps: [icmp]
+    config: {ike_version: 1}
+    expect: {established: true, esp: true, v1_exchanges: {main: 6, quick: 3}}
+
+  e14:
+    scenario: ikev1 aggressive
+    duration_s: 40
+    apps: [icmp]
+    config: {ike_version: 1, aggressive: true, auth: psk}
+    a: {charon: {aggressive_psk: true}}
+    b: {charon: {aggressive_psk: true}}
+    expect: {established: true, esp: true, v1_exchanges: {aggressive: 3}, cleartext_id: true}
+
+  e15:
+    scenario: weak crypto
+    duration_s: 40
+    apps: [icmp]
+    needs: [3DES_CBC, HMAC_SHA1_96, HMAC_MD5_96, MODP_1024]
+    variants:
+      - {ike_proposal: "3des-sha1-modp1024", esp_proposal: "3des-sha1-modp1024"}
+      - {ike_proposal: "3des-md5-modp1024", esp_proposal: "3des-md5-modp1024"}
+    expect: {established: true, esp: true, init_transforms: [3DES, MODP_1024]}
+
+  e16:
+    scenario: null encryption
+    duration_s: 40
+    apps: [icmp]
+    needs: ["NULL", HMAC_SHA2_256_128]
+    config: {esp_proposal: "null-sha256"}
+    expect: {established: true, esp: true, esp_plaintext: true}
+
+  e17:
+    scenario: lossy handshake
+    duration_s: 60
+    apps: [icmp]
+    setup: [loss20_during_setup]
+    expect: {ike_retransmits: true, outcome_recorded: true}
+
+  e18:
+    scenario: multiple tunnels
+    duration_s: 60
+    apps: [icmp]
+    setup: [extra_initiators]
+    expect: {established: true, min_ike_sas: 4, nat_t_ports: 2}
+
+p1:
+  e19:
+    scenario: ah
+    duration_s: 40
+    apps: [icmp]
+    needs: [HMAC_SHA2_256_128]
+    config: {ah_proposal: "sha256", esp_proposal: "aes128gcm16"}
+    expect: {established: true, ah: true, esp: false}
+
+  e20:
+    scenario: replay window off
+    duration_s: 40
+    apps: [icmp]
+    config: {replay_window: 0}
+    expect: {established: true, esp: true, xfrm_replay_window: 0}
+
+  e21:
+    scenario: esn
+    duration_s: 40
+    apps: [icmp]
+    config: {esp_proposal: "aes128gcm16-ecp256-esn", esn: true}
+    expect: {established: true, esp: true, xfrm_esn: true}
+
+  e22:
+    scenario: ike fragmentation
+    duration_s: 40
+    apps: [icmp]
+    needs: [MODP_2048]
+    config: {auth: cert, cert_key: bigchain, fragmentation: force}
+    expect: {established: true, ike_fragments: true}
+
+  e23:
+    scenario: multiple child sas
+    duration_s: 60
+    apps: [voip, icmp]
+    setup: [voip_child]
+    expect: {established: true, min_child_sas: 2, min_esp_spis: 4}
+
+  e24:
+    scenario: mixed families
+    duration_s: 40
+    apps: [icmp]
+    variants:
+      - {outer_family: v6, inner_family: v4}
+      - {outer_family: v4, inner_family: v6}
+    expect: {established: true, esp: true, families_differ: true}
+
+  e25:
+    scenario: ip fragmentation
+    duration_s: 40
+    apps: [icmp_big]
+    expect: {established: true, esp: true, ip_fragments: true}
+
+  e26:
+    scenario: replay attempt
+    duration_s: 50
+    apps: [icmp]
+    setup: [replay_esp_at_30]
+    expect: {established: true, esp: true, duplicate_seq: true, replay_counter_rises: true}

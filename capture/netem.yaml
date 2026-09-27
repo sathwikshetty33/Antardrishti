@@ -1,0 +1,7 @@
+# network condition profiles, drawn uniformly per run.
+# args are applied with `tc qdisc add dev <if> root netem <args>` on BOTH
+# router egress interfaces, so each direction gets the delay (rtt ~ 2x).
+lan: {args: ""}
+broadband: {args: "delay 20ms 5ms loss 0.1%"}
+mobile: {args: "delay 60ms 20ms loss 1%"}
+congested: {args: "delay 120ms 40ms loss 2% rate 5mbit"}
