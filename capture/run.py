@@ -1101,6 +1101,8 @@ def main():
         # pinned registry images when lab/images.lock exists (the same digests on
         # every shard), else a local build
         sh(f"bash {root}/lab/images.sh pull", timeout=3600)
+    # keys once, before any worker starts (workers only copy them into their labs)
+    topo.ensure_keys()
     # a fresh batch: its runs, and an empty placement state
     placement.sched_dir.mkdir(parents=True, exist_ok=True)
     bf = placement.sched_dir / f"batch-{stamp}.json"

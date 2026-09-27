@@ -197,7 +197,7 @@ def up(build=False):
     no_dns([n for n in ("gw_a", "gw_b", "router", "host_a", "host_b", "cli_gw", "svc_gw", "noise_a", "noise_b")])
     routes()
     guard()
-    ensure_pki()
+    ensure_keys()
     for g in ("gw_a", "gw_b"):
         for d in ("x509", "x509ca", "private"):
             dx(c[g], f"mkdir -p /etc/swanctl/{d}")
@@ -222,8 +222,6 @@ def up(build=False):
 def ssh_keys():
     """throwaway key for scp/rsync bulk transfers: clients -> user lab on servers"""
     k = pki / "ssh_lab"
-    if not k.exists():
-        sh(f"ssh-keygen -q -t ed25519 -N '' -C antardrishti-lab -f {k}")
     for n in ("host_a", "cli_gw"):
         dx(c[n], "mkdir -p /root/.ssh && chmod 700 /root/.ssh")
         put(c[n], "/root/.ssh/id_lab", k.read_text())
@@ -236,6 +234,37 @@ def ssh_keys():
 def down():
     sh(f"{compose} --profile multi down --remove-orphans -t 2", check=False, timeout=300)
     sh(f"sudo ip netns del {swns}", check=False)
+
+
+def pki_ok():
+    """every gateway cert must chain to the ca on disk"""
+    if not (pki / "ca.pem").exists():
+        return False
+    for g in ("gw_a", "gw_b"):
+        for k in ("rsa", "ecdsa"):
+            f = pki / f"{g}-{k}.pem"
+            if not f.exists() or sh(f"openssl verify -CAfile {pki}/ca.pem {f}", check=False)[0]:
+                return False
+    return (pki / "ssh_lab").exists() and (pki / "ssh_lab.pub").exists()
+
+
+def ensure_keys():
+    """throwaway lab pki + ssh key, generated once per checkout under a lock.
+    parallel lab workers must never generate them concurrently: interleaved
+    writes leave certs that do not chain to the ca (authentication failures)"""
+    import fcntl
+    pki.mkdir(exist_ok=True)
+    with open(pki / ".lock", "w") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        if not pki_ok():
+            for f in pki.glob("*"):
+                if f.name != ".lock":
+                    f.unlink()
+            ensure_pki()
+            sh(f"ssh-keygen -q -t ed25519 -N '' -C antardrishti-lab -f {pki / 'ssh_lab'}")
+            if not pki_ok():
+                raise RuntimeError("lab pki does not verify after regeneration")
+        fcntl.flock(lk, fcntl.LOCK_UN)
 
 
 def ensure_pki():
