@@ -568,7 +568,7 @@ ghcr. Acceptance:
 - `--dry-run` prints wall-clock, core-hours and storage per shard
 - the adversarial validation passes (section 5); only then may P0 use `--labs 3`
 
-**Phase 4: P0 capture.** Only with the user's go-ahead on the time estimate. Run with
+**Phase 4: P0 capture.** Done 2026-09-27 (section 12). Only with the user's go-ahead on the time estimate. Run with
 `--labs 3` on 4-core codespaces, split with `--slice i/n` across teammates if wanted,
 merge with `tools/merge.py`. Then `coverage.py` must pass P0.
 
@@ -601,3 +601,139 @@ merge with `tools/merge.py`. Then `coverage.py` must pass P0.
   anywhere else.
 - **Storage:** check `du -sh dataset/raw` after every batch. Warn the user when the
   codespace disk passes 10 GB, and suggest exporting and pruning exported tiers.
+---
+
+## 11. Capture runbook (how a tier is captured end to end)
+
+This is the procedure P0 was captured with. Use it for P1 and P2. Times are for 3 labs
+on a 4-core codespace.
+
+### 11.1 Once per account
+
+- Collaborator on `sathwikshetty33/SIH`; the six ghcr packages grant Codespaces read
+  access to this repository (README, "Lab images"). Access applies when a codespace
+  starts.
+- github.com/settings/codespaces: **default idle timeout 240 minutes** (the maximum).
+  A shorter timeout stops the codespace mid-batch; P0 lost three resumes to it.
+- A **classic** token with the `codespace` scope as the Codespaces secret `GHCR_TOKEN`
+  (it also needs `write:packages` to publish images). Never paste tokens into chat or
+  files; `lab/images.sh` logs in with a throwaway docker config.
+- One account runs at most **2 codespaces at a time**, all on the same quota.
+
+### 11.2 Plan
+
+```bash
+python3 capture/run.py --tier p1 --labs 3 --slice 1/2 --dry-run   # every shard of a 2-way split
+```
+
+Check: every shard within 15% of the others, both modes and all wire shapes in each,
+total core-hours within quota. Ask the owner before anything over 2 hours.
+
+### 11.3 Shard codespaces (from the maintainer codespace)
+
+```bash
+GH_TOKEN="$GHCR_TOKEN" gh codespace create -R sathwikshetty33/SIH -b main \
+  -m standardLinux32gb --devcontainer-path .devcontainer/devcontainer.json \
+  --idle-timeout 240m --display-name antar-shard-2
+```
+
+The code must be pushed first: a new codespace clones `main`. Bootstrap (postCreate)
+installs the tools and pulls the pinned images and media (about 10 minutes). Then:
+
+```bash
+GH_TOKEN="$GHCR_TOKEN" gh codespace ssh -c <name> -- 'cd /workspaces/SIH/lab && python3 preflight.py'
+GH_TOKEN="$GHCR_TOKEN" gh codespace stop -c <name>        # until the batch starts
+```
+
+Remote commands: avoid process patterns that match their own command line
+(`pgrep -f "[c]apture/run[.]py"`, not `pkill -f "python3 capture/run.py"`: the ssh
+shell's command contains the same text and kills itself). `gh` is not installed in a
+shard: copy files with `gh codespace cp -e 'remote:<path>' .` from the maintainer.
+
+### 11.4 Launch
+
+Each slice runs detached, so it survives a closed session:
+
+```bash
+setsid nohup python3 capture/run.py --tier p1 --labs 3 --slice i/n --yes \
+  > dataset/raw/_logs/p1-slice-i.out 2>&1 < /dev/null & disown
+```
+
+The coordinator cleans docker (`lab/cleanup.sh`), refuses to start below 5 GB free or
+while another batch's workers live, pulls the pinned images, generates the lab keys
+once, then starts one worker per lab. Logs: `dataset/raw/_logs/<tier>-<stamp>.log`
+(coordinator) and `...-lab<k>.log` (workers).
+
+### 11.5 Monitor and handle interruptions
+
+- Progress: `python3 capture/run.py --tier p1 --slice i/n --status`, or count `: ok`
+  lines in the worker logs.
+- **Codespace restarted** (idle timeout, host maintenance): run the same launch command
+  again. Finished runs are skipped; an interrupted run is redone. Docker's unused image
+  store and stale switch namespaces are cleaned up on the way.
+- **Stopping a batch**: send SIGTERM to the coordinator; it stops its workers, and
+  workers also stop by themselves when their coordinator dies. Check with
+  `pgrep -fa "[c]apture/run[.]py"` that no `--worker` process is left before starting
+  another batch (the coordinator refuses otherwise).
+- **Failed runs** are retried twice at once. Afterwards: `--retry` retries exhausted
+  runs, `--fill-gaps` also adds edge reps, `--redo --ids <ids>` recaptures specific ok
+  runs (for example after an incident). Never an empty `--ids` (it is rejected).
+  Attempts are append-only; the latest ok attempt is the run, and a new attempt
+  replaces a run folder only once it is ok.
+
+### 11.6 Finish, back up, merge
+
+1. Every slice: `--status` prints COMPLETE.
+2. Every slice: `python3 tools/export.py --tier <t> --slice i/n`.
+3. Draft release `<t>-data` (`gh release create <t>-data --draft`), upload each archive
+   and its `.sha256` (copy a shard's archive to the maintainer first), then download
+   again and `sha256sum -c` before anything is deleted.
+4. Merge only the tier's manifest lines of every slice with `tools/merge.py` (it rejects
+   a different plan, seed, design or image set), write `dataset/manifest.jsonl`, run
+   `tools/coverage.py --tier <t>` (exit 0), update `dataset/README.md`, commit, push.
+5. Stop the shard codespaces; delete them once the owner agrees (their data is in the
+   release).
+
+---
+
+## 12. P0 record (2026-09-27)
+
+**Result.** 370 of 370 runs ok, every P0 coverage target met, 1.34 GB, backed up in the
+draft release `p0-data` (two slice archives, checksums verified after download).
+Details in `dataset/README.md` (P0 collection) and `dataset/coverage.md`.
+
+**How.** Two codespaces on the owner's account (the maintainer codespace and
+`antar-shard-2`), `--slice 1/2` and `--slice 2/2`, 3 labs each, 13:33 to 16:12 UTC.
+Pinned images from ghcr, kernel XFRM, netem available.
+
+**Decisions.**
+- Set A reduced to 32 configs (4 ESP wire shapes; AES key size drawn per tunnel), tunnel
+  reuse per config, 2 extra short tunnels per config, 25% test split per tunnel
+  stratified by shape x mode (8 test tunnels, 8 test runs per app).
+- The adversarial validation of parallel labs was **started but not completed**
+  (27/27 serial, 3/91 parallel runs kept in the manifest, tiers `avs` and `avp`):
+  the owner chose to start P0 without waiting for it. Finish it with
+  `python3 tools/advval.py run --yes && python3 tools/advval.py analyze`; until then the
+  datasheet states that parallel-lab effects are unmeasured.
+
+**Incidents during P0, and what was done** (every fix is in `main`):
+
+| incident | effect | fix | runs |
+|---|---|---|---|
+| lab keys generated by 3 workers at once on a fresh codespace | certs not chaining to the ca: AUTHENTICATION_FAILED on shard-2 | keys once, under a lock, verified (34e13e3) | failed runs retried |
+| stopping a coordinator left its workers running; a relaunch ran a second batch on the same labs | generators killed, tunnels torn down mid-run | orphaned workers stop, a second batch is refused (e156e38) | 10 ok runs in the overlap recaptured |
+| an empty `--ids` selected every run; filters applied before slicing | a runaway redo batch (stopped within minutes); a filtered redo covered half its runs | slice first, reject empty ids (9c4dbec) | - |
+| a killed attempt deleted the earlier ok folder | 4 ok runs lost their files | work folder, replaced only when ok (4b482c8) | 4 recaptured |
+| email fetch of large messages on the congested profile ran past the run | generator killed (rc 124) | hard deadline per email action (09dae2c) | 3 email runs retried |
+| stale switch namespace after a restart | resume failed at lab start | replace stale namespaces (13341f4) | - |
+| maintainer codespace idled out 3 times | batch stopped | resumed with the same command; idle timeout raised | none lost |
+| two labs claimed the same run (stale done list) | 4 runs captured twice | fresh done list at claim time (after P0) | latest ok kept |
+
+Found before P0 started: the voip generator offered PCMU first while feeding a 48 kHz
+source, so opus calls ended at once (384ad8c); DNS lookups hung in the isolated labs
+(immediate failure since the veth refactor); Chrome needs ipv6 literals without
+brackets in its resolver rules.
+
+**Open items.** Finish the adversarial validation (above). Labels and the decryption
+spot-check (phase 5). P1 (chat, mixtures, P1 edges; about 24 core-hours), then P2 if
+quota remains.
