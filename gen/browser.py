@@ -10,6 +10,7 @@ flags = ["--autoplay-policy=no-user-gesture-required", "--ignore-certificate-err
 
 
 def open_browser(pw, server, internet=False):
+    """server: the bare ip (chrome matches ipv6 literals in resolver rules without brackets)"""
     args = [f.format(server=server) for f in flags
             if not (internet and f.startswith("--host-resolver-rules"))]
     return pw.chromium.launch(channel="chrome", headless=True, args=args)

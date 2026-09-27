@@ -29,7 +29,7 @@ def main():
     rng = random.Random(a.seed)
     lst = pages(a)
     with sync_playwright() as pw:
-        b = open_browser(pw, a.host)
+        b = open_browser(pw, a.ip)
         ctx = new_context(b)
         page = ctx.new_page()
         while left(a) > 2:

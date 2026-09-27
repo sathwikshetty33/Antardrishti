@@ -2,11 +2,16 @@
 # starts every lab service. config lives in /etc/lab/conf, media is mounted at /srv/media
 c=/etc/lab/conf
 
-# bulk files: incompressible, fixed set of sizes (MB)
-mkdir -p /srv/bulk
-for s in 10 25 50 100 200; do
-  [ -s /srv/bulk/f$s.bin ] || head -c ${s}M /dev/urandom > /srv/bulk/f$s.bin
-done
+# bulk files: incompressible, fixed set of sizes (MB). shared read-only from
+# lab/media/bulk (lab/media.sh bulk); generated locally only as a fallback
+if [ -s /srv/media/bulk/f200.bin ]; then
+  ln -sfn /srv/media/bulk /srv/bulk
+else
+  mkdir -p /srv/bulk
+  for s in 10 25 50 100 200; do
+    [ -s /srv/bulk/f$s.bin ] || head -c ${s}M /dev/urandom > /srv/bulk/f$s.bin
+  done
+fi
 
 # web / hls / bulk over https (h2) and http
 cp $c/nginx.conf /etc/nginx/nginx.conf

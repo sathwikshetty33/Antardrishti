@@ -28,6 +28,10 @@ def one(cfg):
     topo.deploy(cfg)
     dx(srv, "pkill -f [h]ttp.server; true")
     dx(srv, "cd /tmp && head -c 3000000 /dev/urandom > blob && python3 -m http.server --bind :: 8080 >/dev/null 2>&1", detach=True)
+    for _ in range(50):
+        if dx(srv, "ss -ltn | grep -q :8080", check=False)[0] == 0:
+            break
+        time.sleep(0.2)
     dx(r, "pkill tcpdump; rm -f /tmp/s.pcap; tcpdump -i any -s 128 -w /tmp/s.pcap >/dev/null 2>&1", detach=True)
     time.sleep(1.5)
     topo.initiate()

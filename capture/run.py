@@ -1,11 +1,16 @@
 """orchestrator: plan -> run -> validate -> record.
 
-usage: python3 capture/run.py --tier p0 [--scenario voip e01 ...] [--resume]
-                              [--fill-gaps] [--dry-run] [--limit N] [--yes]
+usage: python3 capture/run.py --tier p0 [--labs 3] [--slice 1/2] [--scenario voip e01 ...]
+                              [--resume] [--fill-gaps] [--dry-run] [--limit N] [--yes]
 
 resumable: runs whose latest manifest entry is ok are always skipped, so a
 killed batch (idle timeout, ctrl-c) continues where it stopped. batches over
 2 hours need --yes (ask the user first).
+
+--labs n runs n labs side by side on this machine, one worker process each
+(placement rules in capture/placement.py). --slice i/n takes a deterministic,
+balanced share of the plan so teammates' codespaces can split it (merge the
+manifests with tools/merge.py).
 """
 import argparse
 import hashlib
@@ -26,6 +31,7 @@ here = Path(__file__).resolve().parent
 sys.path[:0] = [str(here), str(here.parent / "lab"), str(here.parent / "gen")]
 import common
 import observe
+import placement
 import plan
 import topo
 from lab import dx, sh
@@ -43,6 +49,7 @@ attempts = 3           # first try + 2 retries
 
 logfile = None   # dataset/raw/_logs/<tier>-<stamp>.log: survives codespace restarts, unlike /tmp
 lab_versions = {}  # package versions + image ids of this batch (topo.versions)
+n_labs = int(os.environ.get("ANTAR_LABS", "1"))  # labs running side by side in this batch
 
 
 def log(*a):
@@ -74,8 +81,11 @@ def record(meta):
     m = {k: v for k, v in meta.items() if k not in slim}
     m["observed"] = {k: v for k, v in (meta.get("observed") or {}).items()
                      if k not in ("errors", "proposals", "esp_first_seq", "replay_counter", "spis", "ike_spis")}
+    import fcntl
     with open(manifest, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
         f.write(json.dumps(m, sort_keys=True, default=list) + "\n")
+        fcntl.flock(f, fcntl.LOCK_UN)
 
 
 # ---------------------------------------------------------------- captures
@@ -137,11 +147,19 @@ def xfrm_snap(d, tag):
 # ---------------------------------------------------------------- lab state
 
 def reset(run):
-    """a clean lab between runs: no ipsec, no netem, no edge rules, no stray tools"""
+    """a clean lab: no ipsec, no nflog, no nat, no extra initiators, plus reset_traffic"""
     topo.stop_ipsec()
-    topo.netem(None)
     topo.nflog(False)
     topo.nat(False)
+    reset_traffic(run)
+    if run.get("edge_case") != "e18":
+        topo.multi_down()
+
+
+def reset_traffic(run):
+    """between two runs on a kept tunnel: no netem, edge rules, captures, noise or
+    generators left over. the tunnel (charon, sas, policies) stays up"""
+    topo.netem(None)
     dx(r_, "nft delete table inet edge 2>/dev/null; pkill tcpdump; pkill tcpreplay; true", check=False)
     for ipt in ("iptables", "ip6tables"):
         dx(topo.c["gw_b"], f"while {ipt} -D OUTPUT -p udp -m multiport --sports 500,4500 -j DROP 2>/dev/null; do :; done", check=False)
@@ -153,8 +171,6 @@ def reset(run):
     for n in ("host_a", "cli_gw", "host_b", "svc_gw"):
         dx(topo.c[n], "pkill -f [p]ython3.-u./gen; pkill baresip; pkill -f [c]hrome; pkill tcpreplay; "
                       "iptables -S INPUT | grep -- '-j DROP' | sed 's/^-A/-D/' | xargs -r -L1 iptables; true", check=False)
-    if run.get("edge_case") != "e18":
-        topo.multi_down()
 
 
 def edge_rules(rules):
@@ -257,7 +273,82 @@ def start_apps(run, ctx, dur, rng):
 
 # ---------------------------------------------------------------- one run
 
-def execute(run, d):
+def tunnel_up():
+    _, out = dx(topo.c["gw_a"], "swanctl --list-sas", check=False)
+    return "ESTABLISHED" in out and "INSTALLED" in out
+
+
+def log_sizes():
+    return {s_: int((dx(topo.c[f"gw_{s_}"], "stat -c %s /var/log/charon.log", check=False)[1] or "0").strip() or 0)
+            for s_ in "ab"}
+
+
+def execute_reuse(run, d, labst):
+    """a mid_stream run on its group's kept tunnel: the capture starts on the
+    established tunnel, so it holds no ike setup and esp sequence numbers carry
+    on from the earlier runs. if the lab lost the tunnel (another lab ran here,
+    a resume, a crash) it is rebuilt first, outside the capture"""
+    cfg, dur = run["config"], run["duration_s"]
+    rng = random.Random(run["seed"])
+    notes = {"timeline": []}
+
+    def mark(what, **kw):
+        notes["timeline"].append({"t": round(time.time(), 3), "what": what, **kw})
+
+    rebuilt = labst.get("tunnel") != run["group"] or not tunnel_up()
+    if rebuilt:
+        reset(run)
+        labst["confs"] = topo.deploy(cfg, {}, backend)
+        if cfg.get("internet"):
+            topo.nat(True)
+        rc, out = topo.initiate(timeout=40, check=False)
+        mark("tunnel_rebuilt", rc=rc)
+        labst.update(tunnel=run["group"], tunnel_up=time.time())
+        time.sleep(1)
+    else:
+        reset_traffic(run)
+    for s_ in "ab":
+        (d / f"swanctl_{s_}.conf").write_text(labst["confs"][s_])
+    if run.get("netem") and run["netem"] != "lan":
+        topo.netem(plan.netems[run["netem"]])
+    topo.nflog(cfg["mode"] == "transport")
+    ctx = topo.gen_ctx(cfg, d)
+    off = log_sizes()
+    t0 = cap_start(run, True)
+    mark("capture_start")
+    xfrm_snap(d, "start")
+    noise_on(run)
+    app_len = max(5, dur - (time.time() - t0) - 2)
+    evs, threads = start_apps(run, ctx, app_len, rng) if run["apps"] else ([], [])
+    mark("apps_start", apps=run["apps"], length=round(app_len, 1))
+    while time.time() - t0 < dur:
+        time.sleep(0.5)
+    for t in threads:
+        t.join(timeout=60)
+    xfrm_snap(d, "end")
+    mark("capture_stop")
+    noise_off()
+    cap_stop(run, d)
+    full = {}
+    for s_ in "ab":
+        _, lg = dx(topo.c[f"gw_{s_}"], "cat /var/log/charon.log", check=False)
+        full[s_] = lg
+        # the run keeps the log of its own window; the setup is in the group's first run
+        (d / f"charon_{s_}.log").write_text(lg.encode()[off[s_]:].decode(errors="replace") + "\n")
+    notes["tunnel"] = {"group": run["group"], "reused": not rebuilt, "rebuilt": rebuilt,
+                       "age_s": round(t0 - labst["tunnel_up"], 1), "log_offset": off}
+    notes["_full_logs"] = full
+    sched = [{**e, "start": round(e["start"] - t0, 3), "stop": round(e["stop"] - t0, 3)}
+             for e in sorted(evs, key=lambda e: e["start"])]
+    (d / "schedule.json").write_text(json.dumps({"capture_start_epoch": t0, "entries": sched,
+                                                 "timeline": [{**x, "t": round(x["t"] - t0, 3)} for x in notes["timeline"]]},
+                                                indent=1, default=list))
+    return t0, sched, notes
+
+
+def execute(run, d, labst):
+    if run["group"] and run["group_pos"] > 0:
+        return execute_reuse(run, d, labst)
     cfg = run["config"]
     rng = random.Random(run["seed"])
     st = run.get("setup", [])
@@ -349,12 +440,17 @@ def execute(run, d):
         (d / f"charon_{s}.log").write_text(lg + "\n")
     if "extra_initiators" in st:
         for g in topo.multi:
-            _, lg = dx(f"antar_{g}", "cat /var/log/charon.log; echo; ip -s xfrm state; swanctl --list-sas", check=False)
+            _, lg = dx(topo.c[g], "cat /var/log/charon.log; echo; ip -s xfrm state; swanctl --list-sas", check=False)
             (d / f"extra_{g}.txt").write_text(lg + "\n")
     _, sas = dx(topo.c["gw_b"], "swanctl --list-sas", check=False)
     notes["sas_b_end"] = sas[-3000:]
     notes["initiate"] = init
     notes["actions"] = done
+    if run["group"]:
+        labst.update(tunnel=run["group"], tunnel_up=init.get("t", t0), confs=confs)
+        notes["tunnel"] = {"group": run["group"], "first": True}
+    else:
+        labst.update(tunnel=None)
     sched = []
     for e in sorted(evs, key=lambda e: e["start"]):
         sched.append({**e, "start": round(e["start"] - t0, 3), "stop": round(e["stop"] - t0, 3)})
@@ -375,17 +471,18 @@ def noise_off():
 
 # ---------------------------------------------------------------- observe + validate
 
-def observed(run, d, t0, sched):
+def observed(run, d, t0, sched, full=None):
     cfg = run["config"]
     ca = observe.charon((d / "charon_a.log").read_text())
     cb = observe.charon((d / "charon_b.log").read_text())
+    whole = observe.charon(full["a"]) if full else ca
     ik = observe.ike(d / "ike.pcap")
     null = "null" in cfg["esp_proposal"]
     es = observe.esp(d / "outer.pcap", null=null)
     xa = observe.xfrm_state((d / "xfrm_a.txt").read_text())
     xb = observe.xfrm_state((d / "xfrm_b.txt").read_text())
     inner_n = observe.count(d / "inner.pcap")
-    o = {"established": ca["ike_established"] > 0 and ca["child_established"] > 0,
+    o = {"established": whole["ike_established"] > 0 and whole["child_established"] > 0,
          "ike_established": ca["ike_established"], "child_established": ca["child_established"],
          "notifies": sorted(ik["notifies"] | ca["notifies"] | cb["notifies"]),
          "wire_notifies": sorted(ik["notifies"]),
@@ -430,16 +527,18 @@ def observed(run, d, t0, sched):
     return o
 
 
-def esp_windows(times, t0, sched):
-    """2 s windows (from capture start) holding esp/ah, overall and per active app"""
-    ws = {int((t - t0) // 2) for t in times}
+def esp_windows(times, t0, sched, dur):
+    """2 s windows aligned to capture start. an app's windows are the ones it is
+    active in (its schedule interval overlaps the window); "esp" counts windows
+    that hold any esp/ah, and esp_active the app windows that hold esp."""
+    n = int(dur // 2)
+    esp = {int((t - t0) // 2) for t in times if 0 <= t - t0 < 2 * n}
     per = defaultdict(set)
     for e in sched:
         if e.get("event") == "app":
-            for w in ws:
-                if e["start"] <= w * 2 and (w + 1) * 2 <= e["stop"] + 0.001:
-                    per[e["app"]].add(w)
-    return {"esp": len(ws), **{k: len(v) for k, v in per.items()}}
+            per[e["app"]] |= {w for w in range(n) if e["start"] < 2 * w + 2 and e["stop"] > 2 * w}
+    return {"esp": len(esp), **{k: len(v) for k, v in per.items()},
+            "esp_active": {k: len(v & esp) for k, v in per.items()}}
 
 
 def check_expect(exp, o, run):
@@ -549,6 +648,28 @@ def expected(run):
     return {"esp": True, "ike_exchanges": ex}
 
 
+def app_ok(app, evs):
+    """did the generator actually produce its traffic, not merely exit cleanly?"""
+    ev = [e for e in evs if e.get("app") == app and e.get("event") != "app"]
+    if app == "voip":
+        return any(e.get("established") for e in ev if e["event"] == "call")
+    if app in ("web",):
+        return any(e.get("loaded") for e in ev if e["event"] == "page")
+    if app == "web_light":
+        return any(e.get("bytes", 0) > 0 for e in ev)
+    if app == "video":
+        return any(e.get("frags", 0) > 0 for e in ev if e["event"] == "play")
+    if app == "email":
+        return any(e["event"] in ("send", "fetch") and e.get("rc", 0) == 0 for e in ev)
+    if app == "bulk":
+        return any(e.get("rc") in (0, "cut at deadline") for e in ev)
+    if app == "chat":
+        return any(e["event"] == "message" for e in ev)
+    if app in ("icmp", "icmp_big"):
+        return any(" 0 received" not in e.get("summary", "") for e in ev)
+    return True
+
+
 def validate(run, o, sched):
     """-> (status, reasons)"""
     why = []
@@ -556,6 +677,8 @@ def validate(run, o, sched):
     for e in apps:
         if e.get("rc") not in (0, None):
             why.append(f"generator {e['app']} rc={e['rc']} {e.get('err', '')[-160:]}")
+        elif not run.get("edge_case") and not run.get("replayed") and not app_ok(e["app"], sched):
+            why.append(f"generator {e['app']} produced none of its traffic (see schedule.json)")
     if run.get("edge_case"):
         if o["inner_packets"] == 0 and run["expect"].get("esp") and run["apps"]:
             why.append("inner capture empty")
@@ -595,21 +718,36 @@ def finish(d):
     return sums
 
 
-def one(run, attempt):
+def one(run, attempt, labst):
     d = raw / run["run_id"]
     if d.exists():
         shutil.rmtree(d)
     d.mkdir(parents=True)
     t_start = time.time()
     status, why, o, notes, sched, t0 = "failed", [], {}, {}, [], None
+    # machine load and concurrency, sampled for the whole run
+    samples, stop = {"cpu": [], "conc": []}, threading.Event()
+
+    def sampler():
+        while not stop.is_set():
+            samples["cpu"].append(placement.cpu_busy(1.0))
+            samples["conc"].append(1 + len(placement.active_now(topo.lab_id)))
+            stop.wait(4)
+    smp = threading.Thread(target=sampler, daemon=True)
+    smp.start()
+    la0 = os.getloadavg()
     try:
-        t0, sched, notes = execute(run, d)
+        t0, sched, notes = execute(run, d, labst)
         run["_timeline"] = [{**x, "t": round(x["t"] - t0, 3)} for x in notes["timeline"]]
-        o = observed(run, d, t0, sched)
-        o["windows_2s"] = esp_windows(o.pop("_esp_times"), t0, sched)
+        o = observed(run, d, t0, sched, notes.pop("_full_logs", None))
+        o["windows_2s"] = esp_windows(o.pop("_esp_times"), t0, sched, run["duration_s"])
         status, why = validate(run, o, sched)
     except Exception as e:
         why = [f"exception: {str(e).strip()[-600:]}"]
+        labst.update(tunnel=None)
+    stop.set()
+    smp.join(timeout=5)
+    t_end = time.time()
     sums = finish(d)
     meta = {k: v for k, v in run.items() if not k.startswith("_") and k not in ("over", "expect", "setup")}
     meta.update({"expected": expected(run), "observed": o, "status": status, "reasons": why,
@@ -623,6 +761,16 @@ def one(run, attempt):
                  "bytes": sum(p.stat().st_size for p in d.iterdir() if p.is_file()),
                  "ts_precision": {"outer": "ns", "ike": "ns",
                                   "inner": "us" if run["config"]["mode"] == "transport" else "ns"},
+                 "lab_id": topo.lab_id, "labs": n_labs,
+                 "concurrency": {"max": max(samples["conc"] or [1]),
+                                 "mean": round(sum(samples["conc"]) / max(1, len(samples["conc"])), 2),
+                                 "overlapping": placement.overlaps(topo.lab_id, t_start, t_end)},
+                 "load": {"cpu_busy_mean": round(sum(samples["cpu"]) / max(1, len(samples["cpu"])), 1),
+                          "cpu_busy_max": max(samples["cpu"] or [0]),
+                          "loadavg_start": [round(x, 2) for x in la0],
+                          "loadavg_end": [round(x, 2) for x in os.getloadavg()]},
+                 "machine": placement.machine(),
+                 "images": {k: v for k, v in lab_versions.items() if k.startswith(("image_", "digest_"))},
                  "inner_capture": "nflog on gw_a (policy match, both directions)" if run["config"]["mode"] == "transport"
                  else "host_a eth0"})
     (d / "meta.json").write_text(json.dumps(meta, indent=1, sort_keys=True, default=list))
@@ -637,17 +785,6 @@ def one(run, attempt):
 
 
 # ---------------------------------------------------------------- batch
-
-def select(args):
-    runs = plan.build(args.tier)
-    if args.scenario:
-        runs = [r for r in runs if r["scenario"] in args.scenario or r["stage"] in args.scenario]
-    if args.rep:
-        runs = [r for r in runs if r["rep"] in args.rep]
-    if args.ids:
-        runs = [r for r in runs if r["run_id"] in args.ids]
-    return runs
-
 
 def gaps(runs, last):
     """edge cases short of their ok reps (mismatches are kept but not counted)
@@ -696,37 +833,50 @@ def hms(s):
     return f"{int(s // 3600)}h{int(s % 3600 // 60):02d}m"
 
 
-def dry_run(runs, todo):
+def dry_run(runs, todo, labs, slices=1):
+    """per-stage table for the selection, then per-shard estimates: wall clock
+    simulated with `labs` parallel labs and the placement rules"""
     cores = os.cpu_count()
     by = defaultdict(list)
     for r in runs:
         by[r["stage"]].append(r)
-    print(f"{'stage':<11}{'runs':>6}{'todo':>6}{'skip':>6}{'est':>9}   scenarios")
-    total = 0
+    print(f"{'stage':<11}{'runs':>6}{'todo':>6}{'skip':>6}{'serial':>9}   scenarios")
     for st, rs in by.items():
         t = [r for r in rs if r["run_id"] in todo and not r.get("skip")]
-        est = sum(plan.cost(r) for r in t)
-        total += est
         sk = sum(1 for r in rs if r.get("skip"))
         sc = Counter(r["scenario"] for r in rs)
-        print(f"{st:<11}{len(rs):>6}{len(t):>6}{sk:>6}{hms(est):>9}   "
+        print(f"{st:<11}{len(rs):>6}{len(t):>6}{sk:>6}{hms(sum(plan.cost(r) for r in t)):>9}   "
               + ", ".join(f"{k}:{v}" for k, v in sc.items()))
-    skipped = {r["scenario"]: r["skip"] for r in runs if r.get("skip")}
-    for k, v in skipped.items():
+    for k, v in {r["scenario"]: r["skip"] for r in runs if r.get("skip")}.items():
         print(f"  skip {k}: {v}")
     split = Counter(r["split"] for r in runs)
     nm = Counter(r.get("netem") for r in runs if r["stage"] != "edge")
-    mid = sum(r.get("capture_start") == "mid_stream" for r in runs)
-    print(f"\nsplit: {dict(split)}  netem (non-edge): {dict(nm)}  mid_stream: {mid}")
-    print(f"estimate: {hms(total)} wall clock on this {cores}-core machine = "
-          f"{total / 3600 * cores:.1f} core-hours (free quota: 120/month)")
-    gb, n = storage(runs, todo)
-    if n:
-        print(f"storage estimate: {gb:.1f} GB compressed for the remaining runs "
-              f"(median size per scenario from {n} measured runs; free storage quota: 15 GB-month)")
-    if total > 2 * 3600:
-        print("more than 2 hours: ask before starting (CLAUDE.md section 1), then pass --yes")
-    return total
+    tr = [r for r in runs if r["group"]]
+    mid = sum(r["capture_start"] == "mid_stream" for r in tr)
+    print(f"\nsplit: {dict(split)}  netem (non-edge): {dict(nm)}  "
+          f"mid_stream: {mid}/{len(tr)} traffic runs = {mid / max(1, len(tr)):.0%} (min 15%)")
+    print(f"\n{labs} lab(s) per machine, {cores} cores; heavy (video/web/bulk) one at a time, "
+          f"voip never next to heavy\n")
+    print(f"{'shard':<8}{'runs':>6}{'serial':>9}{'wall':>9}{'core-h':>8}{'storage':>10}")
+    todo_runs = [r for r in runs if r["run_id"] in todo and not r.get("skip")]
+    tot = [0, 0, 0, 0]
+    for i in range(1, slices + 1):
+        sl = plan.slice_units(todo_runs, i, slices) if slices > 1 else todo_runs
+        serial = sum(plan.cost(r) for r in sl)
+        wall, _ = placement.simulate(sl, labs, plan.cost)
+        gb, n = storage(sl, {r["run_id"] for r in sl})
+        tot = [tot[0] + len(sl), tot[1] + serial, max(tot[2], wall), tot[3] + gb]
+        print(f"{f'{i}/{slices}':<8}{len(sl):>6}{hms(serial):>9}{hms(wall):>9}{wall / 3600 * cores:>8.1f}"
+              f"{gb:>9.2f}G")
+    if slices > 1:
+        print(f"{'all':<8}{tot[0]:>6}{hms(tot[1]):>9}{hms(tot[2]):>9}"
+              f"{sum(placement.simulate(plan.slice_units(todo_runs, i, slices), labs, plan.cost)[0] for i in range(1, slices + 1)) / 3600 * cores:>8.1f}"
+              f"{tot[3]:>9.2f}G   (wall = slowest shard; core-h and storage summed)")
+    print("\nstorage from the median measured size per scenario (manifest ok runs); "
+          "free quotas: 120 core-hours/month, 15 GB-month")
+    if tot[2] > 2 * 3600:
+        print("a shard is over 2 hours: ask before starting (CLAUDE.md section 1), then pass --yes")
+    return tot[2]
 
 
 def storage(runs, todo):
@@ -734,8 +884,11 @@ def storage(runs, todo):
     (falls back to the stage median, then the overall median)"""
     import statistics
     sizes = defaultdict(list)
-    if manifest.exists():
-        for line in manifest.read_text().splitlines():
+    # measured runs: this manifest, plus archived calibration runs (dataset/raw/_dev)
+    for mf in [manifest] + sorted(raw.glob("_dev/*/manifest.jsonl")):
+        if not mf.exists():
+            continue
+        for line in mf.read_text().splitlines():
             if line.strip():
                 m = json.loads(line)
                 if m.get("status") == "ok" and m.get("bytes"):
@@ -761,9 +914,66 @@ def disk():
     return msg
 
 
+def select(args):
+    runs = plan.build(args.tier)
+    if args.scenario:
+        runs = [r for r in runs if r["scenario"] in args.scenario or r["stage"] in args.scenario]
+    if args.rep:
+        runs = [r for r in runs if r["rep"] in args.rep]
+    if args.ids:
+        runs = [r for r in runs if r["run_id"] in args.ids]
+    return runs
+
+
+def parse_slice(v):
+    if not v:
+        return 1, 1
+    i, n = (int(x) for x in v.split("/"))
+    if not 1 <= i <= n:
+        raise SystemExit(f"--slice {v}: need 1 <= i <= n")
+    return i, n
+
+
+def worker(k, batch_file):
+    """one lab: bring it up, then claim and run until the batch is exhausted"""
+    global logfile, lab_versions
+    b = json.loads(Path(batch_file).read_text())
+    logfile = Path(b["log"]).with_name(Path(b["log"]).stem + f"-lab{k}.log")
+    runs = b["runs"]
+    ids = {r["run_id"] for r in runs}
+    topo.up(build=False)
+    lab_versions = topo.versions()
+    log(f"lab {k} up:", json.dumps(lab_versions))
+    _, tries = history()
+    labst = {"tunnel": None}
+    while True:
+        with placement.locked():
+            done = set(placement.load_state().get("done", {}))
+        if ids <= done:
+            break
+        if placement.cpu_busy(2.0) > placement.max_busy:
+            time.sleep(3)
+            continue
+        run = placement.claim(runs, k, done)
+        if run is None:
+            time.sleep(3)
+            continue
+        t0, status = time.time(), "failed"
+        for a in range(tries[run["run_id"]] + 1, tries[run["run_id"]] + attempts + 1):
+            status, why = one(run, a, labst)
+            log(f"lab {k} {run['run_id']} attempt {a}: {status}" + (f" - {'; '.join(why)[:300]}" if why else ""))
+            if status == "ok":
+                break
+        placement.release(k, run, status, t0, time.time())
+    reset({})
+    log(f"lab {k} done")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tier", required=True, choices=sorted(plan.matrix["tiers"]))
+    ap.add_argument("--labs", type=int, default=1, help="labs side by side on this machine")
+    ap.add_argument("--slice", help="i/n: this codespace's share of the plan")
     ap.add_argument("--scenario", nargs="*", help="scenario or stage names")
     ap.add_argument("--resume", action="store_true", help="skip runs already ok (always on)")
     ap.add_argument("--fill-gaps", action="store_true", help="also retry exhausted runs, add edge reps")
@@ -775,45 +985,65 @@ def main():
     ap.add_argument("--list", action="store_true", help="print run ids")
     ap.add_argument("--yes", action="store_true", help="confirm a batch estimated over 2 hours")
     ap.add_argument("--no-build", action="store_true")
+    ap.add_argument("--worker", type=int, help=argparse.SUPPRESS)
+    ap.add_argument("--batch", help=argparse.SUPPRESS)
     args = ap.parse_args()
+    if args.worker is not None:
+        return worker(args.worker, args.batch)
+    si, sn = parse_slice(args.slice)
     runs = select(args)
     last, tries = history()
     if args.fill_gaps:
         runs += gaps(runs, last)
+    if sn > 1:
+        runs = plan.slice_units(runs, si, sn)
     todo = [r for r in runs if last.get(r["run_id"]) != "ok" and not r.get("skip")
             and (args.fill_gaps or args.retry or tries[r["run_id"]] < attempts)]
     if args.list:
         for r in runs:
-            print(r["run_id"], r["split"], r.get("netem"), r.get("capture_start"), last.get(r["run_id"], "-"), r.get("skip") or "")
+            print(r["run_id"], r["split"], r["cls"], r.get("netem"), r.get("capture_start"),
+                  last.get(r["run_id"], "-"), r.get("skip") or "")
     if args.dry_run or args.list:
-        dry_run(runs, {r["run_id"] for r in todo})
+        # estimates for every shard of the chosen split
+        full = select(args) + (gaps(select(args), last) if args.fill_gaps else [])
+        ftodo = {r["run_id"] for r in full if last.get(r["run_id"]) != "ok" and not r.get("skip")}
+        dry_run(full, ftodo, args.labs, sn)
         return
     if args.limit:
         todo = todo[:args.limit]
     global logfile
     (raw / "_logs").mkdir(parents=True, exist_ok=True)
-    logfile = raw / "_logs" / f"{args.tier}-{time.strftime('%Y%m%d-%H%M%S')}.log"
+    stamp = time.strftime('%Y%m%d-%H%M%S')
+    logfile = raw / "_logs" / f"{args.tier}-{stamp}.log"
     log("args:", " ".join(sys.argv[1:]))
-    est = sum(plan.cost(r) for r in todo)
-    log(f"{len(todo)} runs to do ({len(runs) - len(todo)} done or skipped), estimate {hms(est)}")
-    if est > 2 * 3600 and not args.yes:
+    wall, _ = placement.simulate(todo, args.labs, plan.cost)
+    log(f"{len(todo)} runs to do ({len(runs) - len(todo)} done or skipped), "
+        f"estimate {hms(wall)} with {args.labs} lab(s)")
+    if wall > 2 * 3600 and not args.yes:
         sys.exit("estimate over 2 hours: confirm with the user, then rerun with --yes")
     if not todo:
         return
-    topo.up(build=not args.no_build)
-    global lab_versions
-    lab_versions = topo.versions()
-    log("lab:", json.dumps(lab_versions))
-    n_ok = 0
-    for i, run in enumerate(todo, 1):
-        for a in range(tries[run["run_id"]] + 1, tries[run["run_id"]] + attempts + 1):
-            status, why = one(run, a)
-            log(f"[{i}/{len(todo)}] {run['run_id']} attempt {a}: {status}" + (f" - {'; '.join(why)[:300]}" if why else ""))
-            if status == "ok":
-                n_ok += 1
-                break
-    reset({})
-    log(f"batch done: {n_ok}/{len(todo)} ok. {disk()}")
+    if not args.no_build:
+        # pinned registry images when lab/images.lock exists (the same digests on
+        # every shard), else a local build
+        sh(f"bash {root}/lab/images.sh pull", timeout=3600)
+    # a fresh batch: its runs, and an empty placement state
+    placement.sched_dir.mkdir(parents=True, exist_ok=True)
+    bf = placement.sched_dir / f"batch-{stamp}.json"
+    bf.write_text(json.dumps({"runs": todo, "log": str(logfile), "labs": args.labs}, default=list))
+    with placement.locked():
+        placement.save_state({"batch": bf.name, "active": {}, "held": {}, "done": {}, "history": []})
+    procs = []
+    for k in range(args.labs):
+        e = {**os.environ, "ANTAR_LAB": str(k), "ANTAR_LABS": str(args.labs)}
+        procs.append(subprocess.Popen([sys.executable, __file__, "--tier", args.tier, "--worker", str(k),
+                                       "--batch", str(bf)], env=e))
+        time.sleep(5)
+    rc = [p.wait() for p in procs]
+    with placement.locked():
+        st = placement.load_state()
+    n_ok = sum(v == "ok" for v in st.get("done", {}).values())
+    log(f"batch done: {n_ok}/{len(todo)} ok, worker exit codes {rc}. {disk()}")
 
 
 if __name__ == "__main__":

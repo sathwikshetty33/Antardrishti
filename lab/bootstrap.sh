@@ -14,4 +14,10 @@ sudo usermod -aG wireshark "$USER" || true
 python3 -m pip install -q -r lab/requirements.txt
 
 mkdir -p dataset/raw dataset/external/whatsapp dataset/external/public
+
+# lab images: the pinned digests from lab/images.lock (same on every shard), else a local build
+bash lab/images.sh pull || bash lab/images.sh build
+# media: the pinned snapshot, else fetch + encode it here (slow, and a later crawl may differ)
+[ -d lab/media/hls ] || bash lab/images.sh pull-media || bash lab/media.sh all
+[ -s lab/media/bulk/f200.bin ] || bash lab/media.sh bulk
 echo "bootstrap done: $(tshark --version | head -1)"

@@ -30,9 +30,16 @@ def latest():
 
 
 def akey(cfg):
-    esps = sorted(plan.matrix["set_a"]["esp"], key=len, reverse=True)
-    e = next((x for x in esps if cfg["esp_proposal"] == x or cfg["esp_proposal"].startswith(x + "-")), cfg["esp_proposal"])
-    return (cfg["mode"], e, cfg["outer_family"], bool(cfg["encap"]))
+    """set-A config = esp wire shape (not key size) x mode x family x encap"""
+    return (cfg["mode"], cfg.get("esp_shape", cfg["esp_proposal"]), cfg["outer_family"], bool(cfg["encap"]))
+
+
+def app_targets(tiers):
+    """p0 runs one tunnel group per set-A config (32 runs per app, 6 in test at
+    80/20); the p2 second rep brings every app back to the original 40 / 1500 / 8"""
+    if "p2" in tiers:
+        return {"runs": 40, "windows": 1500, "test": 8}
+    return {"runs": 32, "windows": 1400, "test": 6}
 
 
 def bkey(cfg):
@@ -48,30 +55,32 @@ def evaluate(tiers):
     last = latest()
     planned = {t: plan.build(t) for t in tiers}
     allrun = [r for t in tiers for r in planned[t]]
-    ok = [m for m in last.values() if m["status"] == "ok"]
+    ok = [m for m in last.values() if m["status"] == "ok" and m["tier"] in tiers]
+    tg = app_targets(tiers)
     notok = lambda rs: [r["run_id"] for r in rs if last.get(r["run_id"], {}).get("status") != "ok" and not r.get("skip")]
     rows = []
     env = json.loads((root / "dataset" / "env.json").read_text()) if (root / "dataset" / "env.json").exists() else {}
 
     single = [m for m in ok if len(m["apps"]) == 1 and m["stage"] in ("traffic", "chat", "whatsapp")]
     classes = apps6 + (["chat"] if "p1" in tiers else [])
+    na = len(plan.cross(plan.matrix["set_a"]))
     for a in classes:
         rs = [m for m in single if m["apps"][0] in (a, "whatsapp" if a == "chat" else a)]
         win = sum((m["observed"].get("windows_2s") or {}).get(m["apps"][0], 0) for m in rs)
         cfgs = {akey(m["config"]) for m in rs}
         lvl = "p0" if a in apps6 else "p1"
         pr = [r for r in allrun if r["apps"] == [a] and r["stage"] in ("traffic", "chat")]
-        row(rows, lvl, f"app {a}: ok runs", ">= 40", len(rs), len(rs) >= 40, notok(pr))
-        row(rows, lvl, f"app {a}: 2 s windows", ">= 1500", win, win >= 1500)
-        row(rows, lvl, f"app {a}: set-A configs covered", ">= 90% of 48", f"{len(cfgs)}/48", len(cfgs) >= 0.9 * 48)
+        row(rows, lvl, f"app {a}: ok runs", f">= {tg['runs']}", len(rs), len(rs) >= tg["runs"], notok(pr))
+        row(rows, lvl, f"app {a}: 2 s windows", f">= {tg['windows']}", win, win >= tg["windows"])
+        row(rows, lvl, f"app {a}: set-A configs covered", f">= 90% of {na}", f"{len(cfgs)}/{na}", len(cfgs) >= 0.9 * na)
         test = [m for m in rs if m["split"] == "test"]
-        row(rows, lvl, f"app {a}: test runs", ">= 8", len(test), len(test) >= 8)
+        row(rows, lvl, f"app {a}: test runs", f">= {tg['test']}", len(test), len(test) >= tg["test"])
 
     traffic = [m for m in ok if m["stage"] == "traffic"]
     per = Counter(akey(m["config"]) for m in traffic)
     space = plan.cross(plan.matrix["set_a"])
     short = [k for k in space if per[(k["mode"], k["esp"], k["outer_family"], k["encap"])] < 5]
-    row(rows, "p0", "each set-A config: ok runs", ">= 5 (all 48)", f"{48 - len(short)}/48 configs meet it",
+    row(rows, "p0", "each set-A config: ok runs", f">= 5 (all {na})", f"{na - len(short)}/{na} configs meet it",
         not short, [f"{k['mode']}/{k['esp']}/{k['outer_family']}/encap={k['encap']}: "
                     f"{per[(k['mode'], k['esp'], k['outer_family'], k['encap'])]}" for k in short])
 

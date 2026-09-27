@@ -1,10 +1,13 @@
 # experiment design (CLAUDE.md section 5). the plan built from this file with a
 # given tier seed is fully deterministic.
 
-seeds: {p0: 26001, p1: 26002, p2: 26003}
+seeds: {p0: 26001, p1: 26002, p2: 26003, avs: 26099, avp: 26099}
 
-# per-run fixed cost estimate: charon restart, capture setup, zstd, validation
-overhead_s: 30
+# per-run fixed cost (s) beyond the capture itself, measured on the phase 3
+# acceptance runs: capture setup, zstd, tshark analysis, validation. the first
+# run of a tunnel also deploys charon and initiates; heavy captures take longer
+# to analyse (bulk is refined from a measured lan run).
+overhead_s: {base: 10, tunnel_up: 5, video: 16, bulk: 45}
 
 defaults:
   ike_version: 2
@@ -17,13 +20,17 @@ defaults:
   fragmentation: "yes"
   aggressive: false
 
-# size-relevant cross: 2 x 6 x 2 x 2 = 48 configs
+# size-relevant cross: 2 modes x 4 esp wire shapes x 2 families x 2 encap = 32 configs.
+# an esp wire shape fixes what is visible on the wire (iv, icv, block padding).
+# the aes key size is invisible in esp, so it is not crossed: it is drawn per
+# tunnel from the seed and recorded (config.esp_aes_bits).
 set_a:
   mode: [tunnel, transport]
-  esp: [aes128gcm16, aes256gcm16, aes128-sha256, aes256-sha256, aes128-sha1, aes256-sha384]
+  esp: [gcm16, sha1, sha256, sha384]
   outer_family: [v4, v6]
   encap: [false, true]
-  # free diversity, seeded per run and recorded
+  aes_bits: [128, 256]
+  # free diversity, seeded per tunnel and recorded
   sample:
     dh: [ecp256, ecp384, curve25519, modp2048, modp3072]
     pfs: [true, false]
@@ -46,9 +53,13 @@ set_b:
 
 apps: [voip, video, web, email, icmp, bulk]
 
+# tunnel reuse: the runs of one set-A config (one per app, or per combo) share a
+# single tunnel. the tunnel comes up once; each app still gets its own run and
+# capture. the first run of a tunnel is before_tunnel (captures ike setup), the
+# rest are mid_stream (capture starts on the established tunnel: no ike, and
+# esp sequence numbers continue from the earlier runs).
 randomize:
-  mid_stream: 0.3            # else before_tunnel
-  mid_stream_delay_s: [20, 60]
+  min_mid_stream: 0.15       # checked: share of mid_stream traffic runs
   noise: 0.5
 
 tiers:
@@ -73,21 +84,33 @@ tiers:
         - [email, bulk]
         - [voip, video, web]
     - {stage: chat, set: a, apps: [chat], reps: 1, duration_s: 90}
-    - {stage: whatsapp, set: t12, apps: [whatsapp], reps: 1, duration_s: 90, needs: external/whatsapp}
+    - {stage: whatsapp, set: a_tunnel, apps: [whatsapp], reps: 1, duration_s: 90, needs: external/whatsapp}
     - {stage: realism, set: inet8, apps: [web, youtube], reps: 2, duration_s: 90}
     - {stage: edge, level: p1, reps: 3}
   p2:
     - {stage: traffic, set: a, apps: [voip, video, web, email, icmp, bulk], reps: 1, rep_offset: 1, duration_s: 90}
     - {stage: public, set: a_tunnel, apps: [public], reps: 1, duration_s: 90, needs: external/public}
 
-# subsets of set a
+  # adversarial validation of parallel labs (tools/advval.py), not part of the
+  # dataset: the same target runs serially (avs, --labs 1) and at full
+  # parallelism (avp, --labs 3, next to light filler runs). one seed for both,
+  # so every avs run has a twin in avp with the same config, netem and app seed
+  avs:
+    - {stage: av, set: av3, apps: [voip, web, video], reps: 3, duration_s: 90}
+  avp:
+    - {stage: av, set: av3, apps: [voip, web, video], reps: 3, duration_s: 90}
+    - {stage: avfill, set: a, apps: [email, icmp], reps: 1, duration_s: 90}
+
+# subsets of set a (same esp wire shapes; key size drawn per tunnel)
 subsets:
   # both modes, gcm + cbc, v4 + v6 -> 2 x 3 x 2 = 12
-  a12: {mode: [tunnel, transport], esp: [aes128gcm16, aes256-sha256, aes128-sha1], outer_family: [v4, v6], encap: [false]}
+  a12: {mode: [tunnel, transport], esp: [gcm16, sha256, sha1], outer_family: [v4, v6], encap: [false]}
   # replay (tcpreplay injects raw frames, which bypass xfrm, so it can only
-  # enter the tunnel from host_a through gw_a): tunnel only, 6 esp x 2 families = 12.
+  # enter the tunnel from host_a through gw_a): tunnel only -> 4 x 2 x 2 = 16.
   # inner is v4: the captures are v4 and tcprewrite cannot map v4 to v6
-  t12: {mode: [tunnel], esp: [aes128gcm16, aes256gcm16, aes128-sha256, aes256-sha256, aes128-sha1, aes256-sha384], outer_family: [v4, v6], encap: [false], inner_family: v4}
-  a_tunnel: {mode: [tunnel], esp: [aes128gcm16, aes256gcm16, aes128-sha256, aes256-sha256, aes128-sha1, aes256-sha384], outer_family: [v4, v6], encap: [false, true], inner_family: v4}
+  a_tunnel: {mode: [tunnel], esp: [gcm16, sha1, sha256, sha384], outer_family: [v4, v6], encap: [false, true], inner_family: v4}
+  # adversarial validation: 3 set-A configs spanning both modes, both families,
+  # gcm and cbc, with and without nat-t
+  av3: {mode: [tunnel, transport], esp: [gcm16, sha256], outer_family: [v4, v6], encap: [false, true], pick: [0, 7, 13]}
   # tunnel to the real internet, 4 esp x 2 outer families = 8
-  inet8: {mode: [tunnel], esp: [aes128gcm16, aes256gcm16, aes256-sha256, aes128-sha1], outer_family: [v4, v6], encap: [false], inner_family: v4}
+  inet8: {mode: [tunnel], esp: [gcm16, sha1, sha256, sha384], outer_family: [v4, v6], encap: [false], inner_family: v4}

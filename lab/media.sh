@@ -3,7 +3,7 @@
 # mounted at /srv/media). everything here is openly licensed:
 #   big buck bunny, sintel (cc-by, blender foundation)
 #   wikipedia / wikivoyage (cc-by-sa), python docs (psf), arch wiki (gfdl)
-# usage: bash lab/media.sh [hls|sites|all]
+# usage: bash lab/media.sh [hls|sites|bulk|all]
 set -euo pipefail
 cd "$(dirname "$0")"
 what=${1:-all}
@@ -66,6 +66,13 @@ if [ "$WHAT" = sites ] || [ "$WHAT" = all ]; then
     for c in "sites/$p" "sites/$p.html" "sites/$p/index.html"; do [ -f "$c" ] && { echo "/${c}" >> sites/index.txt; break; }; done
   done < /sites.txt
   echo "pages mirrored: $(wc -l < sites/index.txt)"
+fi
+if [ "$WHAT" = bulk ] || [ "$WHAT" = all ]; then
+  # incompressible bulk-transfer files, shared read-only by every lab
+  mkdir -p bulk
+  for s in 10 25 50 100 200; do
+    [ -s bulk/f$s.bin ] || head -c ${s}M /dev/urandom > bulk/f$s.bin
+  done
 fi
 chmod -R a+rX /out
 '

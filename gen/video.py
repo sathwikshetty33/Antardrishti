@@ -20,7 +20,7 @@ def main():
     name = rng.choice(["bbb", "sintel"])
     t0 = rng.randint(0, 150)
     with sync_playwright() as pw:
-        b = open_browser(pw, a.host)
+        b = open_browser(pw, a.ip)
         page = new_context(b).new_page()
         t = time.time()
         page.goto(f"https://{a.host}/player.html?v={name}&t={t0}", timeout=30000)

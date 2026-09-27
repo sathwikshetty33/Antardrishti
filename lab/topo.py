@@ -1,14 +1,27 @@
-"""lab topology control: up/down, routes, netem, pki, strongswan deploy.
+"""lab topology control: up/down, wiring, routes, netem, pki, strongswan deploy.
 
-addresses mirror lab/compose.yaml. the orchestrator imports this module.
+several labs can run side by side on one machine (ANTAR_LAB=0,1,...). each lab
+has its own containers (gateways, router, hosts, services, noise) and its own
+switch network namespace. links are veth pairs into bridges in that namespace,
+so every lab uses the same addresses and mac addresses (derived from the ip):
+runs from different labs are indistinguishable on the wire. labs share only
+images and read-only mounts (media, generators, external pcaps).
 """
+import os
 import time
 
 from lab import bridge_off, dx, put, render, root, sh
 
-compose = f"docker compose -f {root}/lab/compose.yaml"
-c = {n: f"antar_{n}" for n in ("gw_a", "gw_b", "router", "host_a", "host_b",
-                               "cli_gw", "svc_gw", "noise_a", "noise_b")}
+lab_id = int(os.environ.get("ANTAR_LAB", "0"))
+prefix = f"antar{lab_id}"
+os.environ["ANTAR_PREFIX"] = prefix
+# only gw_b's internet uplink (realism tier) is a docker network; it never
+# crosses the router, so a per-lab subnet there is invisible in captures
+os.environ["ANTAR_INET"] = f"192.168.{100 + lab_id}.0/24"
+compose = f"docker compose -p {prefix} -f {root}/lab/compose.yaml"
+swns = f"{prefix}sw"
+c = {n: f"{prefix}_{n}" for n in ("gw_a", "gw_b", "router", "host_a", "host_b", "cli_gw",
+                                  "svc_gw", "noise_a", "noise_b", "gw_c", "nat_n", "gw_d", "gw_e")}
 
 lan = {"a": {"v4": "10.1.0.0/24", "v6": "fd00:1::/64"},
        "b": {"v4": "10.2.0.0/24", "v6": "fd00:2::/64"}}
@@ -25,6 +38,72 @@ host = {"a": {"v4": "10.1.0.10", "v6": "fd00:1::10"},
 anyn = {"v4": "0.0.0.0/0", "v6": "::/0"}
 psk = "antardrishti-lab-throwaway-psk"
 pki = root / "lab" / "pki"
+
+
+# lab links: segment -> [(container, interface, ipv4/prefix, ipv6/prefix or None)]
+links = {
+    "lan_a": [("host_a", "eth0", "10.1.0.10/24", "fd00:1::10/64"),
+              ("gw_a", "lan0", "10.1.0.254/24", "fd00:1::254/64")],
+    "wan_a": [("gw_a", "wan0", "172.31.1.10/24", "fd00:a::10/64"),
+              ("router", "wan_a", "172.31.1.254/24", "fd00:a::254/64"),
+              ("noise_a", "eth0", "172.31.1.20/24", "fd00:a::20/64")],
+    "wan_b": [("router", "wan_b", "172.31.2.254/24", "fd00:b::254/64"),
+              ("gw_b", "wan0", "172.31.2.10/24", "fd00:b::10/64"),
+              ("noise_b", "eth0", "172.31.2.20/24", "fd00:b::20/64")],
+    "lan_b": [("gw_b", "lan0", "10.2.0.254/24", "fd00:2::254/64"),
+              ("host_b", "eth0", "10.2.0.10/24", "fd00:2::10/64")],
+}
+# e18 only (compose profile multi)
+multi_links = {
+    "wan_a": [("gw_c", "eth0", "172.31.1.30/24", None), ("nat_n", "wan0", "172.31.1.40/24", None)],
+    "nat_lan": [("nat_n", "lan0", "172.31.5.254/24", None), ("gw_d", "eth0", "172.31.5.10/24", None),
+                ("gw_e", "eth0", "172.31.5.11/24", None)],
+}
+
+
+def mac(ip4):
+    """locally administered mac from the ipv4 address: the same in every lab"""
+    return "02:00:" + ":".join(f"{int(x):02x}" for x in ip4.split("/")[0].split("."))
+
+
+def pid(name):
+    return sh(f"docker inspect -f '{{{{.State.Pid}}}}' {name}")[1].strip()
+
+
+def wire(multi_only=False):
+    """idempotent: bridges in this lab's switch namespace, one veth per member.
+    containers restarted (or a restarted codespace) simply get new veths."""
+    if sh(f"sudo ip netns exec {swns} true", check=False)[0]:
+        sh(f"sudo ip netns add {swns}")
+        sh(f"sudo ip netns exec {swns} ip link set lo up")
+    # bridges and their ports are pure l2 plumbing: no ipv6 on them, or they send
+    # router solicitations (with random macs) into every lab segment
+    sh(f"sudo ip netns exec {swns} sh -c 'sysctl -qw net.ipv6.conf.all.disable_ipv6=1 "
+       f"net.ipv6.conf.default.disable_ipv6=1; for f in /proc/sys/net/ipv6/conf/*/disable_ipv6; do echo 1 > $f; done'")
+    segs = multi_links if multi_only else links
+    n = 0
+    for seg, members in segs.items():
+        br = f"br_{seg}"
+        if sh(f"sudo ip netns exec {swns} ip link show {br}", check=False)[0]:
+            sh(f"sudo ip netns exec {swns} ip link add {br} type bridge")
+            sh(f"sudo ip netns exec {swns} ip link set {br} up")
+        for cont, dev, a4, a6 in members:
+            name = c[cont]
+            if dx(name, f"ip link show {dev}", check=False)[0] == 0:
+                continue
+            n += 1
+            inside, outside = f"a{lab_id}x{seg[:5]}{n}", f"b{lab_id}x{seg[:5]}{n}"
+            sh(f"sudo ip link add {inside} type veth peer name {outside}")
+            sh(f"sudo ip link set {outside} netns {swns}")
+            sh(f"sudo ip netns exec {swns} ip link set {outside} master {br} up")
+            sh(f"sudo ip link set {inside} netns {pid(name)}")
+            cmds = [f"ip link set {inside} name {dev}", f"ip link set {dev} address {mac(a4)}",
+                    f"ip addr add {a4} dev {dev}"]
+            if a6:
+                cmds.append(f"ip -6 addr add {a6} dev {dev} nodad")
+            cmds.append(f"ip link set {dev} up")
+            dx(name, " && ".join(cmds))
+    return n
 
 
 def route(name, net, via):
@@ -102,10 +181,20 @@ def netem(prof):
             dx(c["router"], f"tc qdisc add dev {dev} root netem {prof['args']}")
 
 
+def no_dns(names):
+    """the lab has no dns: lookups must fail at once. docker leaves the host's
+    resolver in /etc/resolv.conf, unreachable from an isolated lab, so every lookup
+    (sip, smtp reverse lookups, ...) would hang until it times out"""
+    for n in names:
+        dx(c[n], "printf 'nameserver 127.0.0.1\\noptions timeout:1 attempts:1\\n' > /etc/resolv.conf", check=False)
+
+
 def up(build=False):
     bridge_off()
     sh(f"{compose} up -d {'--build' if build else ''} --remove-orphans", timeout=1800)
     time.sleep(1)
+    wire()
+    no_dns([n for n in ("gw_a", "gw_b", "router", "host_a", "host_b", "cli_gw", "svc_gw", "noise_a", "noise_b")])
     routes()
     guard()
     ensure_pki()
@@ -145,7 +234,8 @@ def ssh_keys():
 
 
 def down():
-    sh(f"{compose} down --remove-orphans -t 2", check=False, timeout=300)
+    sh(f"{compose} --profile multi down --remove-orphans -t 2", check=False, timeout=300)
+    sh(f"sudo ip netns del {swns}", check=False)
 
 
 def ensure_pki():
@@ -320,12 +410,14 @@ def multi_conn(name, side):
 def multi_up():
     sh(f"{compose} --profile multi up -d gw_c nat_n gw_d gw_e", timeout=600)
     time.sleep(1)
-    n = "antar_nat_n"
+    wire(multi_only=True)
+    no_dns(["gw_c", "nat_n", "gw_d", "gw_e"])
+    n = c["nat_n"]
     dx(n, "ip route replace 172.31.2.0/24 via 172.31.1.254")
     _, dev = dx(n, "ip -o addr show | awk '$4 ~ /^172.31.1.40\\// {print $2}'")
     dx(n, f"iptables -t nat -F POSTROUTING; iptables -t nat -A POSTROUTING -s 172.31.5.0/24 -o {dev.split()[0]} -j MASQUERADE")
     for g, m in multi.items():
-        dx(f"antar_{g}", f"ip route replace 172.31.2.0/24 via {m['via']}")
+        dx(c[g], f"ip route replace 172.31.2.0/24 via {m['via']}")
     route(c["gw_b"], "172.31.5.0/24", rtr["b"]["v4"])
     return [f"gw-{g[-1]}.lab" for g in multi]
 
@@ -335,14 +427,14 @@ def multi_start(duration=50):
     each tunnel for duration seconds. returns {name: initiate rc}"""
     res = {}
     for g in multi:
-        name = f"antar_{g}"
+        name = c[g]
         swan = render("swanctl.conf.j2", conns=[multi_conn(g, "i")],
                       secrets=[{"id1": f"gw-{g[-1]}.lab", "id2": "gw-b.lab", "psk": psk}])
         put(name, "/etc/swanctl/swanctl.conf", swan)
         charon_start(name, render("strongswan.conf.j2", backend="kernel"))
         dx(name, "swanctl --load-all --noprompt")
     for g in multi:
-        name = f"antar_{g}"
+        name = c[g]
         wan_guard(name, multi[g]["ip"], v6=False)
         res[g] = dx(name, "swanctl --initiate --child t --timeout 20", check=False, timeout=40)[0]
         # light traffic per tunnel, so each one shows esp for tunnel grouping
@@ -352,12 +444,13 @@ def multi_start(duration=50):
 
 def multi_down():
     sh(f"{compose} --profile multi rm -sf gw_c nat_n gw_d gw_e", check=False, timeout=300)
+    # their bridge ports died with the containers; nothing else to clean
 
 
 def versions():
     """what actually ran: images are rebuilt after every codespace restart, so
     package versions can drift within a dataset. recorded in every run's meta"""
-    q = {"strongswan": (c["gw_a"], "swanctl --version | head -1"),
+    q = {"strongswan": (c["gw_a"], "/usr/lib/ipsec/charon --version 2>&1 | grep -m1 -i strongswan"),
          "kernel_ipsec": (c["gw_a"], "uname -r"),
          "nginx": (c["host_b"], "nginx -v 2>&1"),
          "asterisk": (c["host_b"], "asterisk -V"),
@@ -370,4 +463,8 @@ def versions():
     out = {k: dx(n, cmd, check=False)[1].strip()[:80] for k, (n, cmd) in q.items()}
     for n in ("gw_a", "router", "host_a", "host_b", "noise_a"):
         out[f"image_{n}"] = sh(f"docker inspect -f '{{{{.Image}}}}' {c[n]}", check=False)[1][:19]
+    # registry digests when the images came from ghcr (lab/images.sh pull); empty for local builds
+    for img in ("gw", "router", "host", "services", "noise"):
+        _, d = sh(f"docker image inspect -f '{{{{join .RepoDigests \" \"}}}}' antar/{img}", check=False)
+        out[f"digest_{img}"] = d.strip()
     return out
