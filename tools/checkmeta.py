@@ -49,7 +49,7 @@ def check(d):
 
 def main():
     ids = sys.argv[1:]
-    dirs = [raw / i for i in ids] if ids else sorted(p for p in raw.iterdir() if p.is_dir() and not p.name.startswith("_"))
+    dirs = [raw / i for i in ids] if ids else sorted(p for p in raw.iterdir() if p.is_dir() and not p.name.startswith(("_", ".")))
     n_bad = 0
     for d in dirs:
         bad = check(d)

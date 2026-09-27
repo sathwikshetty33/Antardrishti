@@ -719,7 +719,10 @@ def finish(d):
 
 
 def one(run, attempt, labst):
-    d = raw / run["run_id"]
+    # capture into a work folder: an earlier ok folder is only replaced once this
+    # attempt is complete and ok (a killed attempt must never destroy good data)
+    final = raw / run["run_id"]
+    d = raw / f".tmp-{run['run_id']}"
     if d.exists():
         shutil.rmtree(d)
     d.mkdir(parents=True)
@@ -776,6 +779,11 @@ def one(run, attempt, labst):
                  "inner_capture": "nflog on gw_a (policy match, both directions)" if run["config"]["mode"] == "transport"
                  else "host_a eth0"})
     (d / "meta.json").write_text(json.dumps(meta, indent=1, sort_keys=True, default=list))
+    if status == "ok":
+        if final.exists():
+            shutil.rmtree(final)
+        d.rename(final)
+        d = final
     record(meta)
     if status != "ok":
         keep = raw / "_attempts" / f"{run['run_id']}-a{attempt}"
