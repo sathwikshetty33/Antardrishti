@@ -1,0 +1,385 @@
+{
+ "$defs": {
+  "facts_map": {
+   "additionalProperties": true,
+   "description": "fact name -> fact; esp_suite_probabilities is the suite model's full distribution",
+   "properties": {
+    "esp_suite_probabilities": {
+     "anyOf": [
+      {
+       "additionalProperties": {
+        "type": "number"
+       },
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Esp Suite Probabilities"
+    }
+   },
+   "title": "facts_map",
+   "type": "object"
+  },
+  "share_value": {
+   "additionalProperties": false,
+   "properties": {
+    "share": {
+     "title": "Share",
+     "type": "number"
+    },
+    "error_pp": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Error Pp"
+    }
+   },
+   "required": [
+    "share"
+   ],
+   "title": "share_value",
+   "type": "object"
+  },
+  "timing_info": {
+   "additionalProperties": false,
+   "properties": {
+    "seconds": {
+     "title": "Seconds",
+     "type": "number"
+    },
+    "traffic_seconds": {
+     "title": "Traffic Seconds",
+     "type": "number"
+    },
+    "seconds_per_minute": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "title": "Seconds Per Minute"
+    }
+   },
+   "required": [
+    "seconds",
+    "traffic_seconds",
+    "seconds_per_minute"
+   ],
+   "title": "timing_info",
+   "type": "object"
+  },
+  "tunnel_result": {
+   "additionalProperties": false,
+   "properties": {
+    "tunnel": {
+     "title": "Tunnel",
+     "type": "integer"
+    },
+    "initiator": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "title": "Initiator"
+    },
+    "responder": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Responder",
+     "type": "array"
+    },
+    "direction_from": {
+     "title": "Direction From",
+     "type": "string"
+    },
+    "handshake_status": {
+     "enum": [
+      "full",
+      "rekey-only",
+      "esp-only",
+      "failed",
+      "ike-only"
+     ],
+     "title": "Handshake Status",
+     "type": "string"
+    },
+    "esp_packets": {
+     "title": "Esp Packets",
+     "type": "integer"
+    },
+    "start_s": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "title": "Start S"
+    },
+    "end_s": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "title": "End S"
+    },
+    "config": {
+     "$ref": "#/$defs/facts_map"
+    },
+    "byte_share": {
+     "anyOf": [
+      {
+       "additionalProperties": {
+        "$ref": "#/$defs/share_value"
+       },
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Byte Share"
+    },
+    "byte_share_rounded": {
+     "anyOf": [
+      {
+       "additionalProperties": {
+        "type": "integer"
+       },
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Byte Share Rounded"
+    },
+    "active_time_share": {
+     "anyOf": [
+      {
+       "additionalProperties": {
+        "type": "number"
+       },
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Active Time Share"
+    },
+    "active_time_share_rounded": {
+     "anyOf": [
+      {
+       "additionalProperties": {
+        "type": "integer"
+       },
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Active Time Share Rounded"
+    },
+    "windows": {
+     "anyOf": [
+      {
+       "items": {
+        "$ref": "#/$defs/window_row"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Windows"
+    }
+   },
+   "required": [
+    "tunnel",
+    "initiator",
+    "responder",
+    "direction_from",
+    "handshake_status",
+    "esp_packets",
+    "start_s",
+    "end_s",
+    "config"
+   ],
+   "title": "tunnel_result",
+   "type": "object"
+  },
+  "window_row": {
+   "additionalProperties": false,
+   "properties": {
+    "t": {
+     "title": "T",
+     "type": "number"
+    },
+    "pair": {
+     "title": "Pair",
+     "type": "integer"
+    },
+    "esp_bytes": {
+     "title": "Esp Bytes",
+     "type": "number"
+    },
+    "packets": {
+     "title": "Packets",
+     "type": "integer"
+    },
+    "present": {
+     "items": {
+      "enum": [
+       "voip",
+       "video",
+       "web",
+       "email",
+       "icmp",
+       "bulk",
+       "chat"
+      ],
+      "type": "string"
+     },
+     "title": "Present",
+     "type": "array"
+    },
+    "presence_probability": {
+     "additionalProperties": {
+      "type": "number"
+     },
+     "title": "Presence Probability",
+     "type": "object"
+    },
+    "share": {
+     "additionalProperties": {
+      "type": "number"
+     },
+     "title": "Share",
+     "type": "object"
+    }
+   },
+   "required": [
+    "t",
+    "pair",
+    "esp_bytes",
+    "packets",
+    "present",
+    "presence_probability",
+    "share"
+   ],
+   "title": "window_row",
+   "type": "object"
+  }
+ },
+ "additionalProperties": false,
+ "properties": {
+  "schema_version": {
+   "const": "antardrishti.result/1",
+   "default": "antardrishti.result/1",
+   "title": "Schema Version",
+   "type": "string"
+  },
+  "inputs": {
+   "items": {
+    "type": "string"
+   },
+   "title": "Inputs",
+   "type": "array"
+  },
+  "bundle": {
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "null"
+    }
+   ],
+   "title": "Bundle"
+  },
+  "tunnels": {
+   "items": {
+    "$ref": "#/$defs/tunnel_result"
+   },
+   "title": "Tunnels",
+   "type": "array"
+  },
+  "counts": {
+   "additionalProperties": true,
+   "title": "Counts",
+   "type": "object"
+  },
+  "timing": {
+   "$ref": "#/$defs/timing_info"
+  }
+ },
+ "required": [
+  "inputs",
+  "bundle",
+  "tunnels",
+  "counts",
+  "timing"
+ ],
+ "title": "antardrishti.result/1",
+ "type": "object",
+ "$id": "https://github.com/sathwikshetty33/SIH/app/schema/result.v1.json",
+ "description": "the analyzer result contract, version 1 (app/CLAUDE.md section 5).\n\nmatches what `python -m analyzer.cli analyze` writes. `config` maps a fact name to a fact\n(value, confidence, source); the known names are listed in `known_facts`, and new observed\nfacts may be added without a version change (the map is open). anything else that changes\nshape needs a new version (v2.py beside this file).",
+ "x-known-facts": {
+  "handshake_status": "full, rekey-only, esp-only, failed or ike-only (observed)",
+  "outer_family": "ipv4 or ipv6 (observed)",
+  "nat_t": "esp in udp 4500 (observed)",
+  "ike_version": "1 or 2 (read from IKE)",
+  "ike_exchanges": "exchange name -> message count (read from IKE)",
+  "ike_retransmissions": "repeated ike messages (observed)",
+  "ike_encryption": "the responder's chosen ike encryption, with key length (read from IKE)",
+  "ike_integ": "ike integrity (read from IKE)",
+  "ike_prf": "ike prf (read from IKE)",
+  "ike_dh": "ike diffie-hellman group (read from IKE)",
+  "ikev1_mode": "main or aggressive (read from IKE)",
+  "ikev1_auth": "ikev1 phase 1 authentication method (read from IKE)",
+  "ike_lifetime_s": "ikev1 phase 1 lifetime attribute (read from IKE)",
+  "ike_init_payloads": "cleartext payload types of the IKE_SA_INIT response (read from IKE)",
+  "ike_notifies": "cleartext notify types (read from IKE)",
+  "rekeys": "child and ike sa rekey counts (observed)",
+  "rekey_times_s": "rekey times, seconds from the capture start (observed)",
+  "spi_first_seen_s": "first appearance of each esp spi (observed)",
+  "capture_span_s": "seconds between the tunnel's first and last packet (observed)",
+  "ah_packets": "ah packets (observed)",
+  "esp_plaintext_share": "share of esp payloads starting like a cleartext ip header (observed)",
+  "esp_duplicate_seq": "esp packets repeating an (spi, sequence) pair (observed)",
+  "esp_suite": "esp wire shape (inferred by the suite model)",
+  "mode": "tunnel or transport (inferred by the mode model)",
+  "pfs": "true, false or 'not determinable' (inferred by the pfs model, needs a child rekey)"
+ }
+}

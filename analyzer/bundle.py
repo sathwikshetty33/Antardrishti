@@ -13,10 +13,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-import lightgbm as lgb
-
 from analyzer import common as cm
 from analyzer import features as fx
+from analyzer import lgbm
 
 work = cm.feat / "work"
 libs = ["numpy", "pandas", "pyarrow", "lightgbm", "scikit-learn", "scipy", "matplotlib", "zstandard"]
@@ -99,7 +98,7 @@ def load(path=None):
             raise ValueError(f"bundle file {name} does not match SHA256SUMS")
     schema = json.loads((d / "schema.json").read_text())
     cal = json.loads((d / "calibration.json").read_text())
-    boosters = {p.stem: lgb.Booster(model_file=str(p)) for p in d.glob("*.txt")}
+    boosters = {p.stem: lgbm.booster(str(p)) for p in d.glob("*.txt")}
     for k, b in boosters.items():
         cols = schema["config" if k.startswith("config") else "window"]["columns"]
         if b.num_feature() != len(cols):

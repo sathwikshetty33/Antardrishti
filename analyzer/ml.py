@@ -6,6 +6,7 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.model_selection import GroupShuffleSplit, StratifiedGroupKFold, GroupKFold
 
 from analyzer import common as cm
+from analyzer.calib import iso, iso_multi  # noqa: F401 (shared with inference)
 
 threads = 4
 base = {"learning_rate": 0.05, "num_leaves": 15, "min_data_in_leaf": 10, "feature_fraction": 0.8,
@@ -79,16 +80,6 @@ def iso_fit(p, y):
         return {"x": [0.0, 1.0], "y": [float(np.mean(y))] * 2}
     r = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0).fit(p, y)
     return {"x": r.X_thresholds_.tolist(), "y": r.y_thresholds_.tolist()}
-
-
-def iso(c, p):
-    return np.interp(p, c["x"], c["y"])
-
-
-def iso_multi(cs, P):
-    q = np.stack([iso(c, P[:, k]) for k, c in enumerate(cs)], 1)
-    s = q.sum(1, keepdims=True)
-    return np.where(s > 0, q / np.where(s > 0, s, 1), 1.0 / P.shape[1])
 
 
 def best_threshold(p, y):

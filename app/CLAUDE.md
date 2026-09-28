@@ -214,3 +214,9 @@ compose Postgres, uvicorn, Vite).
 
 - **Step 0-1 (2026-09-28).** Spec written; repository at `12fb01f`; Vercel constraints
   checked against the docs (section 2).
+- **Step 2 done (2026-09-28).** Contract `app/schema/v1.py` + `result.v1.json`
+  (`antardrishti.result/1`), validated on real CLI output of 8 kept test captures. Pure
+  inference: `analyzer/lgbm.py` equals lightgbm on all 17 models (max difference 0.0 on
+  12,185 windows and 2,746 config rows), `analyzer/calib.py`, zstandard in the parser; the
+  inference path imports no lightgbm, scikit-learn, pandas or pyarrow and runs no binary.
+  New observed facts for the rules (section 4). Tests: analyzer 46, schema 19, all pass.

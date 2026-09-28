@@ -13,12 +13,12 @@ import ipaddress
 from array import array
 import os
 import struct
-import subprocess
 import tempfile
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+import zstandard
 
 other, esp, ike, keepalive, ah = 0, 1, 2, 3, 4
 kinds = ["other", "esp", "ike", "keepalive", "ah"]
@@ -114,6 +114,17 @@ def index_ng(buf):
 
 
 # ---------------------------------------------------------------- header fields
+
+def plain(buf, f):
+    """does an esp packet's payload start like a cleartext inner ip header (NULL encryption in
+    tunnel mode)? an encrypted payload starts with a random iv, so this is rare by chance"""
+    esp_at = np.where(f["kind"] == esp, np.where(f["udp"], f["l4"] + 8, f["l4"]) + 8, 0)
+    b0 = gather(buf, esp_at, f["lim"])
+    ln = be(buf, esp_at + 2, f["lim"], 2)
+    v4 = (b0 == 0x45) & (ln >= 20) & (ln <= f["tot"])
+    v6 = ((b0 >> 4) == 6) & (be(buf, esp_at + 4, f["lim"], 2) <= f["tot"])
+    return (f["kind"] == esp) & (v4 | v6) & (esp_at + 8 <= f["lim"])
+
 
 def gather(buf, i, lim):
     """byte buf[i] where i < lim (inside the captured record), else 0"""
@@ -212,7 +223,7 @@ def ike_msg(b):
         return None
     ispi, rspi, npl, ver, ex, fl, mid, ln = struct.unpack(">8s8sBBBBII", b[:28])
     m = {"ispi": ispi.hex(), "rspi": rspi.hex(), "ver": ver >> 4, "exch": ex, "flags": fl, "msgid": mid,
-         "len": ln, "notify": [], "ke": None, "sa": None}
+         "len": ln, "notify": [], "ke": None, "sa": None, "payloads": []}
     if m["ver"] == 2:
         pos = 28
         while npl and pos + 4 <= len(b):
@@ -220,6 +231,7 @@ def ike_msg(b):
             body = b[pos + 4:pos + plen]
             if plen < 4:
                 break
+            m["payloads"].append(npl)
             if npl == 33:
                 m["sa"] = sa_v2(body)
             elif npl == 34 and len(body) >= 2:
@@ -236,6 +248,7 @@ def ike_msg(b):
             body = b[pos + 4:pos + plen]
             if plen < 4:
                 break
+            m["payloads"].append(npl)
             if npl == 1:
                 m["sa"] = sa_v1(body)
             elif npl == 4 and m["ke"] is None:
@@ -309,7 +322,8 @@ def load(paths, tmpdir):
         tmp = None
         if p.suffix == ".zst":
             tmp = Path(tmpdir) / p.name[:-4]
-            subprocess.run(["zstd", "-dqf", str(p), "-o", str(tmp)], check=True)
+            with open(p, "rb") as src, open(tmp, "wb") as dst:
+                zstandard.ZstdDecompressor().copy_stream(src, dst, write_size=1 << 20)
             p = tmp
         buf, off, cap, orig, ts, link = index(p)
         f = fields(buf, off, cap, link)
@@ -326,7 +340,7 @@ def load(paths, tmpdir):
              "tot": f["tot"].astype(np.int32), "proto": f["proto"].astype(np.uint8), "addr": f["addr"],
              "kind": f["kind"], "spi": f["spi"].astype(np.uint32), "seq": f["seq"].astype(np.uint32),
              "sport": f["sport"].astype(np.uint16), "dport": f["dport"].astype(np.uint16),
-             "udp": f["udp"].astype(bool), "fidx": f["fidx"]}
+             "udp": f["udp"].astype(bool), "fidx": f["fidx"], "plain": plain(buf, f)}
         rows = len(f["idx"])
         del f
         c = {k_: v[keep] for k_, v in c.items()}
@@ -586,18 +600,36 @@ def tunnel_info(t, rows, msgs, kind, src, dst, sp, dp, fam, isudp, rel, a, ipsec
             "status": status, "esp": int(len(er)), "ah": int(len(ahr)),
             "keepalive": int((kind[rows] == keepalive).sum()), "ike_packets": len(ms),
             "spis": {"up": [f"{x:08x}" for x in up], "down": [f"{x:08x}" for x in down]},
-            "ike": info, "pair_of": pair_of, "init_id": init,
+            "ike": info, "pair_of": pair_of, "init_id": init, **esp_observations(er, rel, a, ipsec),
             "start": float(rel[rows].min()) if len(rows) else None,
             "end": float(rel[rows].max()) if len(rows) else None}
+
+
+def esp_observations(er, rel, a, ipsec):
+    """what the esp headers show: when each spi first appears (sa lifetimes from spi changes),
+    duplicate sequence numbers (replayed packets) and the share of packets whose payload starts
+    like a cleartext ip header (NULL encryption)"""
+    if not len(er):
+        return {"spi_first_seen": {}, "esp_duplicates": 0, "esp_plaintext_share": None}
+    r = ipsec[er]
+    spi, seq, t = a["spi"][r].astype(np.int64), a["seq"][r].astype(np.int64), rel[er]
+    first = {}
+    for s_, tt in zip(spi.tolist(), t.tolist()):
+        first.setdefault(s_, tt)
+    key = (spi << 32) | seq
+    dup = int(len(key) - len(np.unique(key)))
+    return {"spi_first_seen": {f"{k:08x}": round(v, 6) for k, v in first.items()}, "esp_duplicates": dup,
+            "esp_plaintext_share": float(a["plain"][r].mean())}
 
 
 def ike_summary(ms, init, er, rel, a, ipsec, v):
     out = {"version": v, "proposal": {}, "ke": None, "notify": [], "init_req": None, "init_resp": None,
            "retrans": 0, "ccsa": [], "child_rekeys": 0, "ike_rekeys": 0, "rekeys": 0, "exchanges": {},
-           "v1": {}, "quick": 0}
+           "v1": {}, "quick": 0, "init_payloads": [], "first_t": None}
     if not ms:
         return out
     seen = set()
+    out["first_t"] = ms[0]["t"]
     for m in ms:
         name = exch_names.get(m["exch"], str(m["exch"]))
         out["exchanges"][name] = out["exchanges"].get(name, 0) + 1
@@ -612,6 +644,7 @@ def ike_summary(ms, init, er, rel, a, ipsec, v):
                 out["init_req"] = m["len"]
             if resp and out["init_resp"] is None:
                 out["init_resp"] = m["len"]
+                out["init_payloads"] = m["payloads"]
                 if m["sa"]:
                     out["proposal"] = m["sa"]
             if m["ke"] is not None and (resp or out["ke"] is None):

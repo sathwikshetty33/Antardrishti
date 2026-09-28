@@ -17,17 +17,31 @@ from analyzer import aggregate as ag
 from analyzer import bundle as bd
 from analyzer import common as cm
 from analyzer import features as fx
-from analyzer import ml
+from analyzer import calib as ml
 from analyzer import parse
 
-encr = {3: "3des", 11: "null", 12: "aes-cbc", 13: "aes-ctr", 18: "aes-gcm8", 19: "aes-gcm12", 20: "aes-gcm16",
-        28: "chacha20-poly1305", 1: "des (ikev1)", 5: "3des (ikev1)", 7: "aes-cbc (ikev1)"}
-integ = {1: "hmac-md5-96", 2: "hmac-sha1-96", 12: "hmac-sha256-128", 13: "hmac-sha384-192", 14: "hmac-sha512-256"}
-prf = {1: "prf-hmac-md5", 2: "prf-hmac-sha1", 5: "prf-hmac-sha256", 6: "prf-hmac-sha384", 7: "prf-hmac-sha512"}
+# ikev2 transform ids (rfc 7296 / iana) and ikev1 attribute values (rfc 2409): they collide,
+# so each version has its own table
+encr = {1: "des", 2: "des", 3: "3des", 11: "null", 12: "aes-cbc", 13: "aes-ctr", 14: "aes-ccm8", 18: "aes-gcm8",
+        19: "aes-gcm12", 20: "aes-gcm16", 28: "chacha20-poly1305"}
+integ = {1: "hmac-md5-96", 2: "hmac-sha1-96", 5: "aes-xcbc-96", 12: "hmac-sha256-128", 13: "hmac-sha384-192",
+         14: "hmac-sha512-256"}
+prf = {1: "prf-hmac-md5", 2: "prf-hmac-sha1", 4: "prf-aes128-xcbc", 5: "prf-hmac-sha256", 6: "prf-hmac-sha384",
+       7: "prf-hmac-sha512"}
 dh = {1: "modp768", 2: "modp1024", 5: "modp1536", 14: "modp2048", 15: "modp3072", 16: "modp4096", 17: "modp6144",
-      18: "modp8192", 19: "ecp256", 20: "ecp384", 21: "ecp521", 31: "curve25519", 32: "curve448"}
+      18: "modp8192", 19: "ecp256", 20: "ecp384", 21: "ecp521", 22: "modp1024s160", 23: "modp2048s224",
+      24: "modp2048s256", 31: "curve25519", 32: "curve448"}
+encr_v1 = {1: "des", 5: "3des", 7: "aes-cbc"}
+hash_v1 = {1: "hmac-md5-96", 2: "hmac-sha1-96", 4: "hmac-sha256-128", 5: "hmac-sha384-192", 6: "hmac-sha512-256"}
+auth_v1 = {1: "psk", 2: "dss-sig", 3: "rsa-sig", 4: "rsa-enc", 5: "rsa-rev-enc", 8: "ecdsa-sig", 9: "ecdsa-sig",
+           10: "ecdsa-sig", 11: "ecdsa-sig"}
+payload_names = {33: "SA", 34: "KE", 35: "IDi", 36: "IDr", 37: "CERT", 38: "CERTREQ", 39: "AUTH", 40: "Ni/Nr",
+                 41: "N", 42: "D", 43: "V", 46: "SK", 53: "SKF"}
 suite_names = {"gcm16": "AES-GCM-16 (ICV 16)", "cbc_icv12": "AES-CBC + HMAC-SHA1-96",
                "cbc_icv16": "AES-CBC + HMAC-SHA256-128", "cbc_icv24": "AES-CBC + HMAC-SHA384-192"}
+
+
+schema_version = "antardrishti.result/1"
 
 
 def fact(value, confidence, source):
@@ -42,17 +56,42 @@ def config_infer(b, pk, tun):
     facts = {"handshake_status": fact(tun["status"], 1.0, "observed"),
              "outer_family": fact(f"ipv{tun['family']}", 1.0, "observed"),
              "nat_t": fact(bool(tun["natt"]), 1.0, "observed")}
-    if ike.get("version"):
-        facts["ike_version"] = fact(ike["version"], 1.0, "read from IKE")
+    v = ike.get("version")
+    if v:
+        facts["ike_version"] = fact(v, 1.0, "read from IKE")
+        facts["ike_exchanges"] = fact(ike.get("exchanges", {}), 1.0, "read from IKE")
+        facts["ike_retransmissions"] = fact(ike.get("retrans", 0), 1.0, "observed")
+    et, ht = (encr_v1, hash_v1) if v == 1 else (encr, integ)
     if p.get("encr") is not None:
-        name = encr.get(p["encr"], str(p["encr"])) + (f"-{p['keylen']}" if p.get("keylen") else "")
+        name = et.get(p["encr"], f"id {p['encr']}") + (f"-{p['keylen']}" if p.get("keylen") else "")
         facts["ike_encryption"] = fact(name, 1.0, "read from IKE")
-    for k, tab in (("integ", integ), ("prf", prf), ("dh", dh)):
+    for k, tab in (("integ", ht), ("prf", prf), ("dh", dh)):
         if p.get(k) is not None:
-            facts[f"ike_{k}"] = fact(tab.get(p[k], str(p[k])), 1.0, "read from IKE")
+            facts[f"ike_{k}"] = fact(tab.get(p[k], f"id {p[k]}"), 1.0, "read from IKE")
+    if v == 1:
+        ex = ike.get("exchanges", {})
+        facts["ikev1_mode"] = fact("aggressive" if ex.get("AGGRESSIVE") else "main" if ex.get("MAIN") else "unknown",
+                                   1.0, "read from IKE")
+        a1 = ike.get("v1", {})
+        if a1.get("auth") is not None:
+            facts["ikev1_auth"] = fact(auth_v1.get(a1["auth"], f"id {a1['auth']}"), 1.0, "read from IKE")
+        if a1.get("life") is not None:
+            facts["ike_lifetime_s"] = fact(a1["life"], 1.0, "read from IKE")
+    if ike.get("init_payloads"):
+        facts["ike_init_payloads"] = fact([payload_names.get(x, str(x)) for x in ike["init_payloads"]], 1.0,
+                                          "read from IKE")
     if ike.get("notify"):
         facts["ike_notifies"] = fact(ike["notify"], 1.0, "read from IKE")
     facts["rekeys"] = fact({"child": ike.get("child_rekeys", 0), "ike_sa": ike.get("ike_rekeys", 0)}, 1.0, "observed")
+    facts["rekey_times_s"] = fact({"child": [round(x["t"], 3) for x in ike.get("ccsa", []) if x["child"]],
+                                   "ike_sa": [round(x["t"], 3) for x in ike.get("ccsa", []) if not x["child"]]},
+                                  1.0, "observed")
+    facts["spi_first_seen_s"] = fact(tun.get("spi_first_seen", {}), 1.0, "observed")
+    facts["capture_span_s"] = fact(round((tun["end"] or 0) - (tun["start"] or 0), 3), 1.0, "observed")
+    facts["ah_packets"] = fact(tun.get("ah", 0), 1.0, "observed")
+    if tun.get("esp_plaintext_share") is not None:
+        facts["esp_plaintext_share"] = fact(round(tun["esp_plaintext_share"], 4), 1.0, "observed")
+    facts["esp_duplicate_seq"] = fact(tun.get("esp_duplicates", 0), 1.0, "observed")
     if not rows:
         return None, facts
     r = rows[-1]
@@ -106,7 +145,8 @@ def analyze(paths, bundle=None):
     r = parse.parse(paths)
     pkts = r["packets"]
     dur = 0.0
-    out = {"inputs": [str(p) for p in paths], "bundle": b["metadata"].get("commit"), "tunnels": [],
+    out = {"schema_version": schema_version, "inputs": [str(p) for p in paths],
+           "bundle": b["metadata"].get("commit"), "tunnels": [],
            "counts": r["counts"]}
     for tun in r["tunnels"]:
         m = pkts["tunnel"] == tun["id"]
