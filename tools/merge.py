@@ -95,14 +95,26 @@ def main():
                 problems.append(f"{m['run_id']}: not in this checkout's plan")
         elif json.dumps(p["config"], sort_keys=True) != json.dumps(m["config"], sort_keys=True):
             problems.append(f"{m['run_id']}: config differs from the plan (different matrix version?)")
-    # seed and design fingerprint: the same for every shard, and equal to this checkout's
+    # seed and design fingerprint: the same for every shard, and equal to this checkout's,
+    # on the attempt that counts (each run's latest); an earlier attempt redone after a
+    # design change stays in the manifest as history and is only reported
+    latest = {}
+    for m in lines_a:
+        if m["run_id"] not in latest or m["attempt"] > latest[m["run_id"]]["attempt"]:
+            latest[m["run_id"]] = m
     here = plan.design_sha()
     for m in lines_a:
         pl = m.get("plan") or {}
+        why = []
         if pl.get("design_sha") != here:
-            problems.append(f"{m['run_id']}: design {pl.get('design_sha')} != this checkout's {here}")
+            why.append(f"design {pl.get('design_sha')} != this checkout's {here}")
         if pl.get("tier_seed") != plan.matrix["seeds"].get(m["tier"]):
-            problems.append(f"{m['run_id']}: tier seed {pl.get('tier_seed')} != {plan.matrix['seeds'].get(m['tier'])}")
+            why.append(f"tier seed {pl.get('tier_seed')} != {plan.matrix['seeds'].get(m['tier'])}")
+        if why and m is not latest[m["run_id"]]:
+            warnings.append(f"{m['run_id']} attempt {m['attempt']} (superseded by attempt "
+                            f"{latest[m['run_id']]['attempt']}): " + "; ".join(why))
+        else:
+            problems += [f"{m['run_id']}: {w}" for w in why]
     # one plan fingerprint per tier (runs from before plan_sha existed carry none)
     shas = defaultdict(set)
     for m in lines_a:
