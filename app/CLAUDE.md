@@ -220,3 +220,11 @@ compose Postgres, uvicorn, Vite).
   12,185 windows and 2,746 config rows), `analyzer/calib.py`, zstandard in the parser; the
   inference path imports no lightgbm, scikit-learn, pandas or pyarrow and runs no binary.
   New observed facts for the rules (section 4). Tests: analyzer 46, schema 19, all pass.
+- **Step 3 done (2026-09-28).** Rule engine `app/api/rules`: 23 checks in `table.py` (RFC 8221,
+  RFC 8247, NIST SP 800-77r1, RFC 7296, RFC 4303), findings with verdict, severity, standard,
+  evidence and confidence ("Likely (x% confidence)" below 0.8), "not determinable" for PFS
+  without a rekey, ESP key size, replay window and ESN, lifetimes without two rekeys. Risk:
+  weights critical 40, high 20, medium 8, low 3, times confidence, cap 100, floor 90 for a
+  confident critical; overall = worst tunnel. Threat matrix of 8 threats. 60 unit tests pass.
+  On the kept edge captures: NULL ESP 90 (critical), IKEv1 aggressive PSK high, 3DES +
+  modp1024 fail.
