@@ -19,9 +19,10 @@ import plan
 manifest = root / "dataset" / "manifest.jsonl"
 apps6 = plan.matrix["apps"]
 # p1 minimums for 60 s runs: p0's windows target is 35/36 of the most a run can
-# give (1400 of 32 x 45), so the same share of 8 x 30 (anchor) and 32 x 30 (chat)
+# give (1400 of 32 x 45), so the same share of 8 x 30 (anchor) and 32 x 30 (chat);
+# chat: 920 (owner, 2026-09-28): each chat run's own ike setup costs it windows, by design
 p1_anchor_windows = 230
-p1_chat_windows = 930
+p1_chat_windows = 920
 
 
 def latest():
