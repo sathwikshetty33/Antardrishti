@@ -10,3 +10,12 @@ lab/media/
 labels/
 features/
 models/
+!app/api/models/
+!app/api/models/**
+.local-storage/
+.env
+.env.local
+public/
+node_modules/
+app/web/dist/
+.vercel/

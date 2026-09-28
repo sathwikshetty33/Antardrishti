@@ -228,3 +228,10 @@ compose Postgres, uvicorn, Vite).
   confident critical; overall = worst tunnel. Threat matrix of 8 threats. 60 unit tests pass.
   On the kept edge captures: NULL ESP 90 (critical), IKEv1 aggressive PSK high, 3DES +
   modp1024 fail.
+- **Step 4 done (2026-09-28).** Backend `app/api`: FastAPI (`index.py`), SQLAlchemy 2 with
+  NullPool (`db.py`), 9 tables (`models.py`), Alembic migration `0001` (`app/alembic.ini`),
+  storage adapters (local files, Vercel Blob client tokens signed in Python and private
+  downloads), in-request pipeline with polled progress, demo replay in 5 s chunks stored in
+  `replay_chunks`, 3 demo captures (`app/api/demo`), vendored bundle `app/api/models/v1`
+  (checked by `python -m app.api.verify_bundle`). Local timings: demos 1.0-4.6 s, replay step
+  0.4-1.5 s. 10 API tests pass against Docker Postgres.

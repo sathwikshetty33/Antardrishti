@@ -1,0 +1,18 @@
+# local postgres for the antardrishti platform (DEMO.md). port 5434 on the host.
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: antar
+      POSTGRES_PASSWORD: antar
+      POSTGRES_DB: antar
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - antar-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U antar"]
+      interval: 2s
+      retries: 30
+volumes:
+  antar-pg:

@@ -139,16 +139,21 @@ def traffic(b, pk, ctx):
     return tl, P, Q, esp, thr
 
 
-def analyze(paths, bundle=None):
+def analyze(paths, bundle=None, progress=None):
+    """progress(stage, fraction) is called as the stages advance (optional)"""
+    say = progress or (lambda stage, frac: None)
     b = bundle or bd.load()
     t = time.time()
+    say("parsing", 0.0)
     r = parse.parse(paths)
+    say("inferring", 0.4)
     pkts = r["packets"]
     dur = 0.0
     out = {"schema_version": schema_version, "inputs": [str(p) for p in paths],
            "bundle": b["metadata"].get("commit"), "tunnels": [],
            "counts": r["counts"]}
-    for tun in r["tunnels"]:
+    for i, tun in enumerate(r["tunnels"]):
+        say("inferring", 0.4 + 0.5 * i / max(1, len(r["tunnels"])))
         m = pkts["tunnel"] == tun["id"]
         pk = {k: v[m] for k, v in pkts.items()}
         entry = {"tunnel": tun["id"], "initiator": tun["initiator"], "responder": tun["responder"],

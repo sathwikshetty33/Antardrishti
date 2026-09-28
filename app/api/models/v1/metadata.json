@@ -1,0 +1,78 @@
+{
+ "bundle": "v1",
+ "commit": "a88b2a4f3f6126af42900121aab056a8166b15b6",
+ "seed": 26006,
+ "dataset_seeds": [
+  26001,
+  26002,
+  26003,
+  26004,
+  26005
+ ],
+ "data_releases": {
+  "p0-data": {
+   "p0-slice-1-of-2-09dae2c.tar.zst": "e90a3592c5124d6ec5f4a2ac302ba0fdea01a0bc7f07ff1b873413009b52b475",
+   "p0-slice-2-of-2-09dae2c.tar.zst": "4a0b5c4327d826c747fbed05317106cb9535ac8b8acd47bc034a8c58e2ad9771"
+  },
+  "p0-labels": {
+   "p0-labels-a534182.tar.zst": "e33af070de3813b2d199e30c7f8b11bc7d42c61b524aa7ab3ae104baf37d04d4"
+  },
+  "p0s-data": {
+   "p0s-6d1e207.tar.zst": "8ff1334d5a3237ca86cbffa1e44c2a5b85ea9dccd38d13a99fe8b41f19614efc"
+  },
+  "p0s-labels": {
+   "p0s-labels-6d1e207.tar.zst": "3cf5f41608ade494d1613f83d11346a304fd5fd67ecced74872ad7d8bcedcb1f"
+  },
+  "p1-data": {
+   "p1-1683055.tar.zst": "d003b6d373d0f86f26c39ea450328f07c40a102ac84c43aac74f93de0695cb25"
+  },
+  "p1-labels": {
+   "p1-labels-a534182.tar.zst": "f4958fa6b8f137a369bdd7b214508200fae20bf88dd538eeb6698150f8a13e91"
+  },
+  "p1-whatsapp": {
+   "p1-whatsapp-550cfd9.tar.zst": "cf5ebbaf665b94d82eee5b5df735c4d50fb623a3cd1f88ccf8e3c39849264236",
+   "p1-whatsapp-chunks-excluded.jsonl": "c0c959e0cd1306a36f749a2d43a7ded6b6b384ef194f9c5a0c260a54b619142e",
+   "p1-whatsapp-chunks.jsonl": "02136cc631ed46165849789c07c94af95cce527b0b27c4a44333ba440136e71b"
+  },
+  "p1-whatsapp-labels": {
+   "p1-whatsapp-labels-a534182.tar.zst": "7ba16b407a67f4bda82c828c4993ce77358c979ef9b34b315a991d256f33eebb"
+  }
+ },
+ "environment": {
+  "os": "Ubuntu 26.04 LTS",
+  "kernel": "6.6.87.2-microsoft-standard-WSL2",
+  "cpu": "13th Gen Intel(R) Core(TM) i5-1335U",
+  "cores": 12,
+  "mem_gb": 7.6,
+  "python": "3.12.13",
+  "libraries": {
+   "numpy": "2.5.3",
+   "pandas": "3.0.6",
+   "pyarrow": "25.0.1",
+   "lightgbm": "4.7.0",
+   "scikit-learn": "1.9.1",
+   "scipy": "1.18.1",
+   "matplotlib": "3.11.2",
+   "zstandard": "0.25.0"
+  },
+  "machine": "owner's WSL2 Ubuntu machine (local, not a codespace)"
+ },
+ "results": {
+  "suite_accuracy_all": 1.0,
+  "suite_accuracy_50": 0.9845360824742269,
+  "mode_accuracy_all": 0.9536082474226805,
+  "pfs_accuracy_all": 0.9285714285714286,
+  "presence_macro_f1": 0.8509857299823442,
+  "presence_f1": {
+   "voip": 0.9960967993754879,
+   "video": 0.7966305655836342,
+   "web": 0.7863554757630161,
+   "email": 0.7507692307692307,
+   "icmp": 0.9284848484848485,
+   "bulk": 0.7471743010113028,
+   "chat": 0.9513888888888888
+  },
+  "session_share_mae_pp": 4.406496450290305,
+  "cli_seconds_per_minute": 0.3171472706988029
+ }
+}
