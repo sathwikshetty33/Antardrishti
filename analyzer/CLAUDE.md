@@ -323,3 +323,9 @@ the HTTPS packets are `ambiguous:<apps>`. The schedule's app intervals resolve o
   is an icmp-only tunnel: ping sizes vary, so no fixed-size packet shows the inner header),
   PFS 92.9% (14 test tunnels with a rekey). Out-of-fold config context in
   `features/config_pred.parquet`.
+- **Phase C done (2026-09-28).** Traffic models (`python -m analyzer.traffic_models`, 2 min,
+  1.0 GB peak): 12,185 windows (p0s, P1 anchor, mixtures, chat, realism, WhatsApp; no P0
+  traffic runs). Out-of-fold F1: voip 0.985, icmp 0.926, chat 0.884, email 0.745, web
+  0.741, bulk 0.686, video 0.662. Most errors are video, bulk and email confused with each
+  other (all TCP downloads from the lab server). Predictions in
+  `features/window_pred.parquet`.
