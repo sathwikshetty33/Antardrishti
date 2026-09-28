@@ -267,3 +267,70 @@ The first pass was replaced by method A.
 
 Before the method change, the pre-0478d94 `labels.py` (at 4cba50e) and the current one
 gave identical tables on 2 P0 runs (one tunnel, one transport).
+
+## p0s (2026-09-28)
+
+The 192 p0s runs (the serial recapture of P0's traffic) are labelled the same way,
+into `labels/p0s/`.
+- **Code:** `tools/labels.py` as of `cf2e704` (it also reads the periodic key dumps),
+  HEAD `6d1e207`.
+- **Workers:** 2, not 4. The lan bulk runs, with up to 1.8 M ESP packets each, ran out
+  of memory with 4.
+- **Backup:** the draft release `p0s-labels`: `p0s-labels-6d1e207.tar.zst` (90.0 MB),
+  sha256 `3cf5f41608ade494d1613f83d11346a304fd5fd67ecced74872ad7d8bcedcb1f`, verified
+  after download.
+
+| tier | runs | with ESP | median | 25th pct | 5th pct | min | ESP packets | decrypt | prefix | length | unlabelled | paired | no key |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| p0s | 192 | 192 | 100.00% | 100.00% | 99.62% | 90.65% | 16,014,595 | 91.45% | 8.55% | 0.00% | 0.00% | 69.85% | 29 |
+
+"No key": 29 packets, all in `p0s-icmp-843c14d8-r1`. They are the tails of 29
+IPv4-fragmented ESP packets (large pings on the congested profile), so the "SPI" they
+show is payload. Every real SPI of every p0s run has its key, from the periodic dumps.
+The first fragments are labelled; the 29 tails are that run's only unlabelled packets
+(labelled share 90.65%). The run is not flagged: it is at least 90%, and not lan.
+
+Per config:
+
+| config (mode, outer/inner, NAT-T, cipher) | runs | ESP packets | ports in plaintext | decrypt | prefix | length | unlabelled | paired |
+|---|---|---|---|---|---|---|---|---|
+| transport v4/v4 natt=n cbc | 18 | 2,228,204 | 100.00% | 100.00% | 0.00% | 0.00% | 0.00% | 74.45% |
+| transport v4/v4 natt=n gcm | 6 | 293,744 | 100.00% | 100.00% | 0.00% | 0.00% | 0.00% | 54.77% |
+| transport v4/v4 natt=y cbc | 18 | 1,907,750 | 100.00% | 100.00% | 0.00% | 0.00% | 0.00% | 66.89% |
+| transport v4/v4 natt=y gcm | 6 | 135,425 | 100.00% | 100.00% | 0.00% | 0.00% | 0.00% | 73.94% |
+| transport v6/v6 natt=n cbc | 18 | 3,382,161 | 100.00% | 100.00% | 0.00% | 0.00% | 0.00% | 63.86% |
+| transport v6/v6 natt=n gcm | 6 | 1,676,119 | 100.00% | 100.00% | 0.00% | 0.00% | 0.00% | 61.99% |
+| transport v6/v6 natt=y cbc | 18 | 420,930 | 100.00% | 100.00% | 0.00% | 0.00% | 0.00% | 54.03% |
+| transport v6/v6 natt=y gcm | 6 | 277,571 | 100.00% | 100.00% | 0.00% | 0.00% | 0.00% | 61.97% |
+| tunnel v4/v4 natt=n cbc | 18 | 678,453 | 100.00% | 99.99% | 0.00% | 0.00% | 0.00% | 59.25% |
+| tunnel v4/v4 natt=n gcm | 6 | 210,388 | 100.00% | 100.00% | 0.00% | 0.00% | 0.00% | 54.06% |
+| tunnel v4/v4 natt=y cbc | 18 | 1,806,214 | 100.00% | 100.00% | 0.00% | 0.00% | 0.00% | 67.02% |
+| tunnel v4/v4 natt=y gcm | 6 | 171,600 | 100.00% | 100.00% | 0.00% | 0.00% | 0.00% | 54.57% |
+| tunnel v6/v6 natt=n cbc | 18 | 613,758 | 0.00% | 0.00% | 100.00% | 0.00% | 0.00% | 97.91% |
+| tunnel v6/v6 natt=n gcm | 6 | 1,405,843 | 100.00% | 100.00% | 0.00% | 0.00% | 0.00% | 83.97% |
+| tunnel v6/v6 natt=y cbc | 18 | 754,662 | 0.00% | 0.00% | 100.00% | 0.00% | 0.00% | 98.17% |
+| tunnel v6/v6 natt=y gcm | 6 | 51,773 | 100.00% | 100.00% | 0.00% | 0.00% | 0.00% | 97.47% |
+
+Against the P0 twins (same config and app):
+
+| app | runs | p0s ESP packets | P0 twins' ESP packets | ratio | p0s median labelled | P0 twins' median labelled |
+|---|---|---|---|---|---|---|
+| voip | 32 | 455,694 | 254,894 | 1.79 | 100.00% | 100.00% |
+| video | 32 | 2,725,599 | 2,949,747 | 0.92 | 100.00% | 100.00% |
+| web | 32 | 138,557 | 254,839 | 0.54 | 100.00% | 100.00% |
+| email | 32 | 588,642 | 607,270 | 0.97 | 100.00% | 100.00% |
+| icmp | 32 | 31,114 | 19,947 | 1.56 | 100.00% | 100.00% |
+| bulk | 32 | 12,074,989 | 5,449,148 | 2.22 | 100.00% | 100.00% |
+
+**Flagged runs:** none. Every lan run is at least 98% and every run at least 90%.
+
+**Decryption spot-check:** `tools/decrypt_check.py --tier p0s`, seed 26005. It picked
+the twins of the P0 sample: both modes, both outer families, GCM and CBC.
+
+| run | mode | outer/inner | NAT-T | ESP | checked | app errors | unverifiable | paired equal | tshark = labels.py |
+|---|---|---|---|---|---|---|---|---|---|
+| `p0s-bulk-df1a0b23-r1` | tunnel | v4/v4 | no | aes128gcm16 | 300 | 0 | 0 | 153/153 | 300/300 |
+| `p0s-bulk-e42f44e6-r1` | tunnel | v6/v6 | yes | aes256-sha1 | 300 | 0 | 300 | 299/299 | 300/300 |
+| `p0s-web-e25294bb-r1` | transport | v4/v4 | no | aes256-sha384 | 300 | 0 | 0 | 159/159 | 300/300 |
+| `p0s-video-2857e318-r1` | transport | v6/v6 | no | aes256-sha256 | 300 | 0 | 0 | 226/226 | 300/300 |
+| `p0s-web-df1a0b23-r1` | tunnel | v4/v4 | no | aes128gcm16 | 300 | 0 | 0 | 160/160 | 300/300 |

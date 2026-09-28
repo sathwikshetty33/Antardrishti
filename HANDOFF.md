@@ -75,7 +75,10 @@ delete them.
    are written to `labels/<tier>/`, never into run folders; the P0 runs were only read
    from the verified `p0-data` release. Draft releases `p0-labels`, `p1-labels` and
    `p1-whatsapp-labels`; tables and flagged runs in `dataset/labels.md`, record in §12.
-2. Serial recapture of the 192 P0 traffic runs (owner's account, about 24 core-hours).
+2. Serial recapture of the 192 P0 traffic runs: **done** 2026-09-28 as tier `p0s`
+   (account `sathwik34`, 2 slices, `--labs 1`). All 192 ok and timing-valid, each run the
+   paired twin of its P0 run (`recapture_of`). Draft releases `p0s-slice1`,
+   `p0s-slice2`, `p0s-data` and `p0s-labels`; record in §12.
 3. P1: **done** on 2026-09-27 (account `sathwik34`, 2 slices, `--labs 1`): 192/192 runs ok,
    draft releases `p1-slice1`, `p1-slice2`, `p1-data` (verified). Record in `dataset/CLAUDE.md`
    §12. WhatsApp replay done 2026-09-28 from the public ITC captures: 16/16 ok, draft

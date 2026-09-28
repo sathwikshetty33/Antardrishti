@@ -65,6 +65,51 @@ ok runs: 370 (lab 370, internet 0, replayed 0)
 - none
 <!-- p0:end -->
 
+<!-- p0s:start -->
+## P0S
+
+ok runs: 192 (lab 192, internet 0, replayed 0)
+
+| level | target | minimum | actual | met |
+|---|---|---|---|---|
+| p0s | app voip: ok runs | >= 32 | 32 | yes |
+| p0s | app voip: 2 s windows | >= 1400 | 1418 | yes |
+| p0s | app voip: set-A configs covered | >= 90% of 32 | 32/32 | yes |
+| p0s | app voip: test runs | >= 8 | 8 | yes |
+| p0s | app video: ok runs | >= 32 | 32 | yes |
+| p0s | app video: 2 s windows | >= 1400 | 1440 | yes |
+| p0s | app video: set-A configs covered | >= 90% of 32 | 32/32 | yes |
+| p0s | app video: test runs | >= 8 | 8 | yes |
+| p0s | app web: ok runs | >= 32 | 32 | yes |
+| p0s | app web: 2 s windows | >= 1400 | 1438 | yes |
+| p0s | app web: set-A configs covered | >= 90% of 32 | 32/32 | yes |
+| p0s | app web: test runs | >= 8 | 8 | yes |
+| p0s | app email: ok runs | >= 32 | 32 | yes |
+| p0s | app email: 2 s windows | >= 1400 | 1433 | yes |
+| p0s | app email: set-A configs covered | >= 90% of 32 | 32/32 | yes |
+| p0s | app email: test runs | >= 8 | 8 | yes |
+| p0s | app icmp: ok runs | >= 32 | 32 | yes |
+| p0s | app icmp: 2 s windows | >= 1400 | 1434 | yes |
+| p0s | app icmp: set-A configs covered | >= 90% of 32 | 32/32 | yes |
+| p0s | app icmp: test runs | >= 8 | 8 | yes |
+| p0s | app bulk: ok runs | >= 32 | 32 | yes |
+| p0s | app bulk: 2 s windows | >= 1400 | 1435 | yes |
+| p0s | app bulk: set-A configs covered | >= 90% of 32 | 32/32 | yes |
+| p0s | app bulk: test runs | >= 8 | 8 | yes |
+| p0s | each set-A config: ok runs | >= 5 (all 32) | 32/32 configs meet it | yes |
+| p0s | traffic runs captured alone (timing_valid) | all | 192/192 | yes |
+| p0s | paired with its p0 twin (config, app, split, netem, noise, capture_start) | all | 192/192 | yes |
+| p0s | mid-stream (esp-only) captures | >= 15% of traffic runs | 160/192 = 83% | yes |
+| p0s | netem broadband | >= 15% of runs | 52/192 = 27% | yes |
+| p0s | netem congested | >= 15% of runs | 47/192 = 24% | yes |
+| p0s | netem lan | >= 15% of runs | 46/192 = 24% | yes |
+| p0s | netem mobile | >= 15% of runs | 47/192 = 24% | yes |
+
+### Gaps
+
+- none
+<!-- p0s:end -->
+
 <!-- p1:start -->
 ## P1
 

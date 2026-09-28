@@ -158,12 +158,66 @@ the tunnel and gw_b's NAT. In mixtures, web and video both use HTTPS to the same
 server, so per-packet app labels there would be ambiguous (the run-level labels are exact).
 <!-- p1:end -->
 
+<!-- p0s:start -->
+## p0s collection (2026-09-28)
+
+p0s is P0's 192 traffic runs, recaptured one lab per machine. Each p0s run is the
+**paired twin** of one P0 traffic run, recorded as `recapture_of` in its meta.json. It
+keeps the twin's tunnel config, app, app order, split, netem profile, noise and
+capture_start. Only its run seed (tier seed 26004) and the capture concurrency differ.
+
+| | |
+|---|---|
+| ok runs | **192** of 192 planned: 32 set-A tunnels × 6 apps (voip, video, web, email, icmp, bulk), 90 s |
+| attempts | 197: the first 5 runs were redone after the design gained the twin pairing and the periodic key dumps |
+| split | 144 train / 48 test (P0's 8 test tunnels, one per wire shape × mode) |
+| origin | 192 lab |
+| capture window | 2026-09-28, 13:45 to 17:04 UTC. 2 codespaces of the account `sathwik34` (4 cores each), one lab per machine (`--labs 1`), `--slice 1/2` (13:45 to 16:34) and `--slice 2/2` (13:45 to 17:04), code `f2850ff`. Design `ed9e524368e5e9a7`, plan `6954551793740594` |
+| timing | every run was captured alone on its machine: `timing_valid` true, concurrency 1, mean machine CPU 13.9% |
+| netem | broadband 52, congested 47, lan 46, mobile 47 (each run the same as its twin) |
+| capture start | 32 before_tunnel, 160 mid_stream (83%) |
+| keys | both gateways' `ip -s xfrm state` every 10 s during each capture (`xfrm_<gw>_periodic.txt`), besides the start and end dumps. Every ESP packet's SPI has its key |
+| images, environment | the P0 pins (`lab/images.lock`) and media snapshot `1d265727`; same kernel, Docker, strongSwan and preflight results as P0 and P1 |
+| size | 1.84 GB compressed |
+| storage | draft releases `p0s-slice1` and `p0s-slice2` (one per slice), `p0s-data` (the merged tier) and `p0s-labels`, each with its `.sha256`, verified after download |
+| coverage | every P0 traffic target in `coverage.md` is met; 192 of 192 runs are timing-valid, exact twins |
+| labels | method A: median labelled share 100%, 5th percentile 99.62%, min 90.65%. 91.45% of ESP packets are labelled by decryption and 8.55% are `prefix` (IPv6 in IPv6 with CBC); no length fallback. The tshark spot-check found 0 app errors in 5 runs |
+
+**What concurrency changed.** P0 ran 3 labs on one machine; p0s ran one. The twins'
+traffic differs in volume, not only timing:
+
+| app | p0s / P0 ESP packets |
+|---|---|
+| bulk | 2.22× |
+| voip | 1.79× |
+| icmp | 1.56× |
+| email | 0.97× |
+| video | 0.92× |
+| web | 0.54× |
+
+Alone on the machine, lan bulk transfers ran at full speed:
+- `p0s-bulk-0b569375-r1`: 1.79 M ESP packets against its twin's 1.07 M;
+- `p0s-bulk-f63ef6cd-r1`: a 217 MB capture against its twin's 77 K ESP packets.
+
+So p0s is a timing-valid recapture of P0's traffic, not a copy of its packet counts. A
+model comparing the twins sees both effects.
+
+**Timing validity by tier:**
+- **Timing-valid** (`timing_valid: true`), each run captured alone on its machine:
+  - p0s: all 192 runs;
+  - P1 traffic stages: anchor, mixtures, chat, WhatsApp and realism.
+- **Not timing-valid:**
+  - P0 traffic (3 parallel labs; annotated `timing_valid: false`);
+  - P0 short, handshake and edge runs, which are not timing-sensitive;
+  - P1 edge cases.
+<!-- p0s:end -->
+
 <!-- labels:start -->
 ## Per-packet labels (2026-09-28)
 
-Every ok run of P0, P1 and the WhatsApp replay has per-packet labels in
+Every ok run of P0, P1, the WhatsApp replay and p0s has per-packet labels in
 `labels/<tier>/<run_id>/labels.parquet`, backed up in the draft releases `p0-labels`,
-`p1-labels` and `p1-whatsapp-labels`. Tables, validation and flagged runs:
+`p1-labels`, `p1-whatsapp-labels` and `p0s-labels` (p0s figures: its section above). Tables, validation and flagged runs:
 `dataset/labels.md`.
 
 | | |

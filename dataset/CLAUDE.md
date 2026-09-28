@@ -1070,3 +1070,61 @@ traffic runs. Resolved on 2026-09-28:
 - Fragmented ESP stays unlabelled.
 - Serial recapture of the P0 traffic runs.
 
+### p0s (2026-09-28)
+
+**Result.**
+- 192 of 192 runs ok. Every run is timing-valid (alone on its machine, concurrency 1)
+  and the paired twin of its P0 traffic run (section 5).
+- Every P0 traffic target is met (`coverage.md`); 1.84 GB.
+- Backed up in the draft releases, each with its `.sha256`, verified after download:
+
+| release | archive | sha256 |
+|---|---|---|
+| `p0s-slice1` | `p0s-slice-1-of-2-f2850ff.tar.zst` | `10200ec461f270b970eafc743d521bb5592cc803ad35c0ed131cb1ea997442d4` |
+| `p0s-slice2` | `p0s-slice-2-of-2-f2850ff.tar.zst` | `c2d3cac9e493200a15942066c1a3e4e8d81362272c1ebb1af642e390d34a5b77` |
+| `p0s-data` | `p0s-6d1e207.tar.zst` | `8ff1334d5a3237ca86cbffa1e44c2a5b85ea9dccd38d13a99fe8b41f19614efc` |
+| `p0s-labels` | `p0s-labels-6d1e207.tar.zst` | `3cf5f41608ade494d1613f83d11346a304fd5fd67ecced74872ad7d8bcedcb1f` |
+
+- **Labels (method A):** median 100% labelled, 5th percentile 99.62%, 0 flagged runs,
+  no length fallback. The tshark spot-check found 0 app errors in 5 runs
+  (`dataset/labels.md`).
+
+**How.**
+- Account `sathwik34`: the maintainer codespace ran `--slice 1/2` (13:45 to 16:34 UTC),
+  and a second codespace, `antar-p0s-slice2` (4-core, 240-minute idle timeout), ran
+  `--slice 2/2` (13:45 to 17:04 UTC). Both used code `f2850ff`, seed 26004, design
+  `ed9e524368e5e9a7`, plan `6954551793740594` and the pinned images; digests and
+  preflight were checked on both.
+- Slice 2 was exported on its own codespace, copied here (`gh codespace cp -e`, checked
+  against its own `.sha256`) and released from here.
+- Both slices' lines were merged with `tools/merge.py --tier p0s`: 192 runs, 192 ok.
+- The slice-2 codespace was deleted once its release was verified and its lines were
+  pushed.
+- A self keep-alive (owner-approved, capped) kept the maintainer codespace active.
+
+**Decisions** (owner, 2026-09-28):
+- **Twins:** each p0s run copies its P0 twin's tunnel config, app, app order, split,
+  netem, noise and capture_start; only the run seed and the concurrency differ.
+- **Keys:** dumped every 10 s during each capture.
+- **Lab:** unchanged. No offload, network or image changes.
+- **The 5 early runs:** captured before the pairing and the key dumps, then redone. Their
+  start and end dumps covered every SPI, but 4 of them differed from their twins in
+  netem or noise, and the design fingerprint changed. The superseded attempts stay in
+  the manifest.
+
+**Incidents during p0s, and what was done:**
+
+| incident | effect | fix | runs |
+|---|---|---|---|
+| slice 1 was launched before the owner's gates (billing, twin pairing, key dumps, design record) | 5 runs under an earlier design | paused, fixed (`cf2e704`, `f2850ff`), relaunched with `--redo` | 5 redone |
+| `images.sh pull-media` over `gh codespace ssh` said "unauthorized": the ssh session has no registry token | none | the creation-time bootstrap had pulled the pinned media. The media matched this codespace file for file, except the bulk payloads, which `media.sh` generates from `/dev/urandom` on every machine | - |
+| slice 2's first launch did nothing: `dataset/raw/_logs/` doesn't exist on a fresh codespace | a minute lost | create it, then launch | - |
+| lan bulk runs took up to 17 minutes (captures up to 266 MB) | slice 2, which had 6 of the 8 lan bulk runs, finished 30 minutes after slice 1 | none needed. `plan.deal` costs every bulk run the same, whatever its netem | - |
+| `merge.py` would reject the tier over the 5 superseded attempts' old design fingerprint | merge blocked | check design and seed on each run's counting attempt; superseded ones are warnings (`ed2482e`) | - |
+| `git push` from slice 2's ssh session had no credentials | shard branch not pushed | the manifest and archive were copied here and merged, pushed and released from here | - |
+| the disk reached 94% (downloads, exports, verification copies) | labelling was at risk | removed the local copies of archives already in verified releases | - |
+| labelling with 4 workers ran out of memory on the lan bulk runs | first labelling attempt aborted | relabelled with 2 workers | - |
+
+**Open items.** The planner's cost model (`plan.deal`) should weigh bulk runs by
+netem, so slices balance better.
+
