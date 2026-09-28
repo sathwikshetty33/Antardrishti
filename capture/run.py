@@ -330,6 +330,7 @@ def execute_reuse(run, d, labst):
         topo.netem(plan.netems[run["netem"]])
     topo.nflog(cfg["mode"] == "transport")
     ctx = topo.gen_ctx(cfg, d)
+    ctx.update(split=run["split"], replay_label=run.get("replay_label"), replay_rank=run.get("replay_rank"))
     off = log_sizes()
     t0 = cap_start(run, True)
     mark("capture_start")
@@ -399,6 +400,7 @@ def execute(run, d, labst):
     if cfg["mode"] == "transport":
         topo.nflog(True)
     ctx = topo.gen_ctx(cfg, d)
+    ctx.update(split=run["split"], replay_label=run.get("replay_label"), replay_rank=run.get("replay_rank"))
 
     delay = run.get("capture_delay_s", 0)
     before = run.get("capture_start") == "before_tunnel"
@@ -791,6 +793,12 @@ def one(run, attempt, labst, last=True):
     conc = max(samples["conc"] or [1])
     sums = finish(d)
     meta = {k: v for k, v in run.items() if not k.startswith("_") and k not in ("over", "expect", "setup")}
+    rp = next((e for e in sched if e.get("event") == "replay"), None)
+    if rp and rp.get("source"):
+        # replayed public captures: what exactly was replayed (gen/replay.py)
+        meta.update({"label": rp.get("label"), "source": rp["source"],
+                     "replay": {k: rp.get(k) for k in ("doi", "scenario", "device", "split", "source_file",
+                                                       "start_s", "end_s", "pcap", "packets", "sha256", "client_ip")}})
     meta.update({"expected": expected(run), "observed": o, "status": status, "reasons": why,
                  "attempt": attempt, "edge_setup": run.get("setup", []), "overrides": run.get("over") or {},
                  "capture_start_epoch": t0, "wall_s": round(time.time() - t_start, 1),

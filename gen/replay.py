@@ -9,7 +9,15 @@ replayed packets hit no real sockets, so both hosts drop inbound traffic
 from each other during the replay (no rst / icmp unreachable pollution).
 tunnel mode only: tcpreplay injects raw frames, which bypass xfrm.
 runs are always marked replayed: true.
+
+whatsapp (owner decision 2026-09-28): public itc captures, cut into labelled chunks
+by tools/whatsapp_prep.py (dataset/external/whatsapp/manifest.jsonl). a run replays
+a chunk of its own label (plan.replay_labels) from a source file of its own split;
+voip runs alternate between the two datasets and the runs of one (label, split)
+take different source files. the chunk's sha256 is checked before the replay.
 """
+import hashlib
+import json
 import random
 import subprocess
 import time
@@ -56,15 +64,44 @@ def prepare(pcap, work, cli, a_mac, gw_a_mac, b_mac, gw_b_mac, a_ip, b_ip):
     return work / "c2s.pcap", work / "s2c.pcap"
 
 
+def choose(source, ctx, rng):
+    """(chunk path, manifest row) for a labelled run, sha256 checked"""
+    d = root / "dataset" / "external" / source
+    rows = [json.loads(l) for l in open(d / "manifest.jsonl") if l.strip()]
+    label, split, rank = ctx["replay_label"], ctx["split"], ctx.get("replay_rank") or 0
+    el = [r for r in rows if r["label"] == label and r["split"] == split]
+    if not el:
+        raise RuntimeError(f"no {label} chunks in the {split} split of {d}/manifest.jsonl")
+    sets = sorted({r["source"] for r in el})
+    ds = sets[rank % len(sets)]
+    files = sorted({r["source_file"] for r in el if r["source"] == ds})
+    random.Random(f"{source}:{label}:{split}:{ds}").shuffle(files)
+    f = files[(rank // len(sets)) % len(files)]
+    mine = sorted((r for r in el if r["source"] == ds and r["source_file"] == f), key=lambda r: r["file"])
+    # a full chunk when the file has one: a short tail would leave most of the run empty
+    full = [r for r in mine if r["end_s"] - r["start_s"] >= 75]
+    row = rng.choice(full or mine)
+    pcap = d / row["file"]
+    got = hashlib.sha256(pcap.read_bytes()).hexdigest()
+    if got != row["sha256"]:
+        raise RuntimeError(f"{row['file']}: sha256 {got} != manifest {row['sha256']}")
+    return pcap, row
+
+
 def start(duration, seed, ctx, source="whatsapp"):
-    """ctx needs cli/srv containers, gw containers, host ips and run_dir"""
-    files = sorted(p for p in (root / "dataset" / "external" / source).glob("*")
-                   if p.suffix in (".pcap", ".pcapng"))
+    """ctx needs cli/srv containers, gw containers, host ips and run_dir (and, for a
+    labelled run, replay_label, replay_rank and split)"""
+    d = root / "dataset" / "external" / source
+    files = sorted(p for p in d.glob("*") if p.suffix in (".pcap", ".pcapng"))
     if not files:
         return [{"app": source, "event": "skipped", "start": time.time(), "stop": time.time(),
                  "reason": f"no pcaps in dataset/external/{source}"}]
     rng = random.Random(seed)
-    pcap = rng.choice(files)
+    row = {}
+    if ctx.get("replay_label") and (d / "manifest.jsonl").exists():
+        pcap, row = choose(source, ctx, rng)
+    else:
+        pcap = rng.choice(files)
     cli = client_ip(pcap)
     work = Path(ctx["run_dir"]) / "replay"
     c2s, s2c = prepare(pcap, work, cli, mac(ctx["cli"]), mac(ctx["gw_a"], ctx["gw_a_lan"]),
@@ -82,6 +119,14 @@ def start(duration, seed, ctx, source="whatsapp"):
     outs = [p.communicate(timeout=duration + 60) for p in procs]
     for c, peer in ((ctx["cli"], ctx["ip"]), (ctx["srv"], ctx["a_ip"])):
         sh(f"docker exec {c} iptables -D INPUT -s {peer} -j DROP")
-    return [{"app": source, "event": "replay", "start": at, "stop": time.time(), "pcap": pcap.name,
-             "client_ip": cli, "replayed": True, "rc": [p.returncode for p in procs],
-             "tcpreplay": [o[0][-300:] + o[1][-300:] for o in outs]}]
+    prov = {k: row[k] for k in ("label", "source", "doi", "scenario", "device", "split", "source_file",
+                                "start_s", "end_s", "packets", "sha256") if k in row}
+    end = time.time()
+    rc = [p.returncode for p in procs]
+    # the app interval (its 2 s windows) is the replay; 124 = trimmed at the run's end
+    bad = [x for x in rc if x not in (0, 124)]
+    return [{"app": source, "event": "replay", "start": at, "stop": end, "pcap": pcap.name,
+             "client_ip": cli, "replayed": True, "rc": rc,
+             "tcpreplay": [o[0][-300:] + o[1][-300:] for o in outs], **prov},
+            {"app": source, "event": "app", "start": at, "stop": end, "rc": bad[0] if bad else 0,
+             "err": "; ".join(o[1][-200:] for o in outs) if bad else ""}]

@@ -11,6 +11,7 @@ import hashlib
 import itertools
 import json
 import random
+from collections import Counter
 from pathlib import Path
 
 import yaml
@@ -187,7 +188,27 @@ def build(tier):
                     randomize(r_rng, r)
                     runs.append(r)
     assign_split(runs)
+    replay_labels(runs)
     return runs
+
+
+def replay_labels(runs):
+    """whatsapp replay runs (owner decision 2026-09-28): half replay chat chunks, half
+    voip (call) chunks, two of each per wire shape, the test runs split evenly.
+    replay_rank numbers the runs of one (label, split), so each takes another source
+    file (gen/replay.py). no design change: these fields are outside plan_sha"""
+    wa = [r for r in runs if r["stage"] == "whatsapp"]
+    for i, shape in enumerate(sorted({r["config"]["esp_shape"] for r in wa})):
+        rs = sorted((r for r in wa if r["config"]["esp_shape"] == shape),
+                    key=lambda r: (r["split"] != "test", r["config"]["outer_family"], r["config"]["encap"]))
+        pattern = ["chat", "voip"] if i % 2 == 0 else ["voip", "chat"]
+        for j, r in enumerate(rs):
+            r["replay_label"] = pattern[j % 2]
+    rank = Counter()
+    for r in sorted(wa, key=lambda r: r["run_id"]):
+        k = (r["replay_label"], r["split"])
+        r["replay_rank"] = rank[k]
+        rank[k] += 1
 
 
 def edge_run(tier, eid, e, rep, seed):
