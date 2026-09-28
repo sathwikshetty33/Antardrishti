@@ -79,11 +79,15 @@ def evaluate(tier):
     rows = []
     if tier == "p1":
         p1_rows(rows, ok, allrun, notok)
+    elif tier == "p0s":
+        p0_rows(rows, ok, allrun, notok, tiers, "p0s")
+        p0s_rows(rows, ok)
     else:
         p0_rows(rows, ok, allrun, notok, tiers)
-    level = "p1" if tier == "p1" else "p0"
+    level = tier if tier in ("p1", "p0s") else "p0"
     algs = {a for v in env.get("swanctl_algs", {}).values() for a in v}
-    for eid, e in plan.edges[level].items():
+    # edge rows for the tiers whose plan has edge runs (p0s recaptures traffic only)
+    for eid, e in (plan.edges[level].items() if any(r["stage"] == "edge" for r in allrun) else ()):
         miss = [n for n in e.get("needs", []) if algs and n not in algs]
         if miss:
             row(rows, level, f"edge {eid} {e['scenario']}", ">= 3 ok", "unsupported: " + ", ".join(miss), True)
@@ -116,8 +120,9 @@ def evaluate(tier):
     return rows, sorted(set(gaps)), ok, last
 
 
-def p0_rows(rows, ok, allrun, notok, tiers):
-    """p0 (and p2 with it): single apps on set A, tunnels per config, set B"""
+def p0_rows(rows, ok, allrun, notok, tiers, level="p0"):
+    """p0 (and p2 with it): single apps on set A, tunnels per config, set B; p0s, the
+    serial recapture of p0's traffic, takes the traffic rows only"""
     tg = app_targets(tiers)
     single = [m for m in ok if len(m["apps"]) == 1 and m["stage"] == "traffic"]
     na = len(plan.cross(plan.matrix["set_a"]))
@@ -126,23 +131,25 @@ def p0_rows(rows, ok, allrun, notok, tiers):
         w = sum(win(m) for m in rs)
         cfgs = {akey(m["config"]) for m in rs}
         pr = [r for r in allrun if r["apps"] == [a] and r["stage"] == "traffic"]
-        row(rows, "p0", f"app {a}: ok runs", f">= {tg['runs']}", len(rs), len(rs) >= tg["runs"], notok(pr))
-        row(rows, "p0", f"app {a}: 2 s windows", f">= {tg['windows']}", w, w >= tg["windows"])
-        row(rows, "p0", f"app {a}: set-A configs covered", f">= 90% of {na}", f"{len(cfgs)}/{na}", len(cfgs) >= 0.9 * na)
+        row(rows, level, f"app {a}: ok runs", f">= {tg['runs']}", len(rs), len(rs) >= tg["runs"], notok(pr))
+        row(rows, level, f"app {a}: 2 s windows", f">= {tg['windows']}", w, w >= tg["windows"])
+        row(rows, level, f"app {a}: set-A configs covered", f">= 90% of {na}", f"{len(cfgs)}/{na}", len(cfgs) >= 0.9 * na)
         test = [m for m in rs if m["split"] == "test"]
-        row(rows, "p0", f"app {a}: test runs", f">= {tg['test']}", len(test), len(test) >= tg["test"])
+        row(rows, level, f"app {a}: test runs", f">= {tg['test']}", len(test), len(test) >= tg["test"])
 
     traffic = [m for m in ok if m["stage"] == "traffic"]
     per = Counter(akey(m["config"]) for m in traffic)
     space = plan.cross(plan.matrix["set_a"])
     short = [k for k in space if per[(k["mode"], k["esp"], k["outer_family"], k["encap"])] < 5]
-    row(rows, "p0", "each set-A config: ok runs", f">= 5 (all {na})", f"{na - len(short)}/{na} configs meet it",
+    row(rows, level, "each set-A config: ok runs", f">= 5 (all {na})", f"{na - len(short)}/{na} configs meet it",
         not short, [f"{k['mode']}/{k['esp']}/{k['outer_family']}/encap={k['encap']}: "
                     f"{per[(k['mode'], k['esp'], k['outer_family'], k['encap'])]}" for k in short])
 
+    if level != "p0":
+        return
     tun = Counter(akey(m["config"]) for m in ok if m["stage"] in ("traffic", "short") and m.get("group_pos", 0) == 0)
     tshort = [k for k in space if tun[(k["mode"], k["esp"], k["outer_family"], k["encap"])] < 3]
-    row(rows, "p0", "each set-A config: tunnels (traffic + short)", f">= 3 (all {na})",
+    row(rows, level, "each set-A config: tunnels (traffic + short)", f">= 3 (all {na})",
         f"{na - len(tshort)}/{na} configs meet it", not tshort,
         [f"{k['mode']}/{k['esp']}/{k['outer_family']}/encap={k['encap']}: "
          f"{tun[(k['mode'], k['esp'], k['outer_family'], k['encap'])]}" for k in tshort])
@@ -150,9 +157,21 @@ def p0_rows(rows, ok, allrun, notok, tiers):
     hs = [m for m in ok if m["stage"] == "handshake" and m["observed"].get("child_rekeys", 0) >= 1]
     hper = Counter(bkey(m["config"]) for m in hs)
     bshort = [c for c in plan.b_configs() if hper[(c["dh"], c["pfs"], c["auth"])] < 3]
-    row(rows, "p0", "each set-B combo: ok runs with a child rekey", ">= 3 (all 20)",
+    row(rows, level, "each set-B combo: ok runs with a child rekey", ">= 3 (all 20)",
         f"{20 - len(bshort)}/20 combos meet it", not bshort,
         [f"{c['dh']}/pfs={c['pfs']}/{c['auth']}: {hper[(c['dh'], c['pfs'], c['auth'])]}" for c in bshort])
+
+
+def p0s_rows(rows, ok):
+    """p0s: every run alone on its machine, and the paired twin of its p0 traffic run"""
+    twin = {r["run_id"]: r for r in plan.build("p0")}
+    bad = [m["run_id"] for m in ok if not (m.get("timing_valid") and m["concurrency"]["max"] == 1)]
+    row(rows, "p0s", "traffic runs captured alone (timing_valid)", "all", f"{len(ok) - len(bad)}/{len(ok)}", not bad, bad)
+    keys = ("config", "apps", "split", "netem", "noise", "capture_start", "duration_s")
+    off = [m["run_id"] for m in ok if m.get("recapture_of") not in twin
+           or any(m[k] != twin[m["recapture_of"]][k] for k in keys)]
+    row(rows, "p0s", "paired with its p0 twin (config, app, split, netem, noise, capture_start)", "all",
+        f"{len(ok) - len(off)}/{len(ok)}", not off, off)
 
 
 def p1_rows(rows, ok, allrun, notok):
@@ -260,7 +279,7 @@ def main():
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
     have = {m["tier"] for m in latest().values()}
-    tiers = [args.tier] if args.tier else [t for t in ("p0", "p1", "p2") if t in have]
+    tiers = [args.tier] if args.tier else [t for t in ("p0", "p0s", "p1", "p2") if t in have]
     bad = []
     for tier in tiers:
         rows, gaps, ok, _ = evaluate(tier)
