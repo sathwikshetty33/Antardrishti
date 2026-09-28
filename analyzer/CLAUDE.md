@@ -27,9 +27,8 @@ the analyzer's spec (owner brief, 2026-09-28).
   features or model files over 50 MB. The model bundle goes to a draft release.
 - **Code style:** `dataset/CLAUDE.md` section 10: short lowercase names, no
   semicolon-stacked one-liners, plain dicts and lists.
-- **Budget.** The whole job gets at most 12 core-hours, estimated per phase before work
-  starts. Check in with the owner whenever usage passes 12. Billing numbers come from the
-  owner (github.com/settings/billing/usage), never from a token.
+- **Budget.** On the owner's local machine (2026-09-28) no Codespaces budget applies.
+  Ask the owner before any step not covered here that would take over an hour.
 - **Commits:** one subject line per phase (`analyzer: ...`), no body.
 
 ## 2. Data
@@ -41,15 +40,20 @@ the analyzer's spec (owner brief, 2026-09-28).
 | `p1-data`, `p1-labels` | P1: 192 runs (anchor, mixtures, chat, realism, edge) | config and traffic models |
 | `p1-whatsapp`, `p1-whatsapp-labels` | 16 WhatsApp replay runs | config and traffic models |
 
-- **Download:** `gh release download` into `/tmp/antar/dl`, the codespace's large
-  temporary disk. Check every archive with `sha256sum -c` before extracting.
-- **Extract** into `/tmp/antar/raw/<tier>` and `/tmp/antar/labels/<tier>`. The local
-  `dataset/raw` is not used.
+- **Machine (owner, 2026-09-28):** the owner's WSL2 Ubuntu machine, not a codespace.
+  Data lives in `~/antar-data` in the Linux home folder (never under `/mnt/c`), outside
+  the repo. No Codespaces budget gates apply. Memory stays under about 75% of what WSL
+  has; heavy steps run with `nice -n 10`.
+- **Download:** `gh release download` into `~/antar-data/dl`. Check every archive with
+  `sha256sum -c` before extracting.
+- **Extract** into `~/antar-data/raw/<tier>` and `~/antar-data/labels/<tier>`. The
+  local `dataset/raw` is not used.
 - **Work run by run:**
   - Decompress a run's captures to a temporary file, parse it, then delete the file.
   - Cache the run's packet table and tunnel rows under `features/` (gitignored).
   - Delete the run's extracted folder once its features are cached.
-- **Workers:** at most 2. In phase 5, 4 workers ran out of memory on the lan bulk runs.
+- **Workers:** 1 for parsing, 2 only when monitoring shows clear headroom. In phase 5,
+  4 workers ran out of memory on the lan bulk runs. Runs are processed one at a time.
 - **Metadata:** the release names and checksums go into the model bundle.
 
 ## 3. Tier usage (strict)
@@ -162,7 +166,8 @@ label) is cached. Windows are computed from it once the config predictions exist
 - Single-app runs (anchor, p0s, chat, realism, WhatsApp) give the run's app to every
   window with traffic. Realism's app is web (YouTube was blocked on every run). WhatsApp's
   app is the run's `label`.
-- **Open decisions (section 11):** leaked bulk transfers and ambiguous HTTPS in mixtures.
+- **Decided (section 11):** leaked bulk transfers keep their app, ambiguous HTTPS in
+  mixtures is resolved by the schedule or left unknown, realism windows take the run's app.
 
 Features and labels are cached to parquet under `features/`. Row counts are reported per
 tier and class.
@@ -252,9 +257,10 @@ Everything below uses the held-out test split, reported honestly.
 Analyzer seed **26006**. It sets the folds, LightGBM and any sampling. The dataset's
 seeds are 26001 to 26005.
 
-## 11. Findings and open decisions
+## 11. Findings and label decisions
 
-Found while reading the labels (2026-09-28). These await the owner's decision.
+Found while reading the labels (2026-09-28). Decided by the owner on 2026-09-28; the
+decisions follow each finding.
 
 **Leaked bulk transfers.** An scp or rsync transfer started in one run can continue
 through the next runs on the same lab. The ssh connection survives the tunnel being
@@ -270,19 +276,36 @@ port 22, so the app is bulk. Runs where such traffic is over 1% of the ESP bytes
 | P1 chat, WhatsApp | 48 | 0 | - |
 
 Giving the run's app to every window would label these ssh transfers as icmp, voip,
-web and so on. Proposal: single-app runs take the run's app, except packets whose
-decrypted header names another lab app (here always bulk over ssh). Those keep that app,
-so their windows become mixed windows.
+web and so on.
+
+- **Decision:** single-app runs take the run's app, except packets whose decrypted
+  header names another lab app (here always bulk over ssh). Those keep that app, so
+  their windows become mixed windows.
+- **Report:** per tier and stage, the runs and ESP bytes relabelled this way.
+- **P0 vs p0s comparison (optional, section 8):** leaked bytes are excluded from both
+  twins. The report notes that the earlier "bulk 2.22x" finding (`dataset/README.md`)
+  may be partly due to the leak, not only to concurrency.
+- **Root cause:** the scp and rsync generators are not killed at run end, so the ssh
+  transfer outlives its run and crosses the next runs' re-established tunnels. The
+  capture fix is recorded in `dataset/CLAUDE.md` (section 12, open items), not yet
+  implemented.
 
 **QUIC in realism.** The per-packet labels call Google's QUIC flows (UDP 443 with
-ephemeral client ports) "voip". The port rule misfires on internet traffic. The run's
-app (web) applies, as the brief says.
+ephemeral client ports) "voip". The port rule misfires on internet traffic.
+
+- **Decision:** realism windows take the run's app (web); the QUIC-as-voip port rule
+  is ignored there. The leaked-bulk exception above still applies.
 
 **Ambiguous HTTPS in mixtures.** In video+web, voip+video+web and video+bulk (curl),
 the HTTPS packets are `ambiguous:<apps>`. The schedule's app intervals resolve only
-12-17% of those bytes. Proposal: where one candidate app is active, the packet gets it.
-Otherwise the window's presence and share are unknown for the candidate apps only.
-Those windows are left out of those apps' training and evaluation, and counted in the
-report. An alternative costs about 0.5 h: attribute whole flows by their start time
-against the generators' logged events (page loads, transfers, playback start),
-validated against the byte counts the generators recorded.
+12-17% of those bytes.
+
+- **Decision:** where only one candidate app is active (schedule intervals), the packet
+  gets that app. Otherwise the window's presence and share are unknown for the
+  candidate apps only; the other apps' labels stay exact.
+- Windows unknown for an app are left out of that app's presence and share training and
+  evaluation, and out of session-share scoring for that app.
+- **Report:** excluded windows per app and per app pair, and `REPORT.md` states the rule.
+- **Future fix** (capture, not yet implemented): separate server addresses for video
+  and web, recorded in `dataset/CLAUDE.md` (section 12, open items). The rejected
+  alternative was flow attribution by the generators' logged events (about 0.5 h).

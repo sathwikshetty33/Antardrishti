@@ -1128,3 +1128,21 @@ traffic runs. Resolved on 2026-09-28:
 **Open items.** The planner's cost model (`plan.deal`) should weigh bulk runs by
 netem, so slices balance better.
 
+### Capture fixes found by the analyzer (2026-09-28, not yet implemented)
+
+Found while reading the labels for the analyzer (`analyzer/CLAUDE.md`, section 11).
+The analyzer works around both with label rules; the captures are unchanged.
+
+- **Leaked bulk transfers.** The scp and rsync generators are not killed at run end.
+  Their ssh connection survives the tunnel being torn down and set up again, so a
+  transfer continues through the next runs on the same lab. 15 p0s runs, 3 P1 anchor
+  runs, 6 mixtures and 1 realism run carry over 1% leaked bulk bytes (worst
+  `p1-icmp-ca3d545d-r1`, 99.7%). The p0s/P0 bulk ratio of 2.22x (`dataset/README.md`)
+  may be partly due to the leak. **Fix (not yet implemented):** kill the bulk
+  generator's process group (scp, rsync, ssh, curl) at run end, and have validation
+  fail a run whose inner capture shows port-22 traffic when bulk is not one of its apps.
+- **Ambiguous HTTPS in mixtures.** Video and web (and curl bulk) reach the same lab
+  server on port 443, so their packets are `ambiguous:<apps>` in video+web,
+  voip+video+web and video+bulk. **Fix (not yet implemented):** separate server
+  addresses for video and web (and for curl bulk), so the inner header names the app.
+
