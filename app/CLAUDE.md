@@ -1,0 +1,216 @@
+# Antardrishti platform (phase 3)
+
+The product around the trained models (`analyzer/`, bundle `models-v1`): a rule engine,
+a FastAPI backend with PostgreSQL and a React dashboard, deployable on Vercel's free
+(Hobby) tier and runnable locally. Owner brief, 2026-09-28. The models are not retrained or
+changed; the dataset is not touched.
+
+---
+
+## 1. Rules
+
+- **No background work.** No workers, Redis, queues or long-lived processes. An analysis
+  runs synchronously inside the request that starts it; the UI polls its status.
+- **Passive analysis only.** Everything shown comes from the outer capture, through
+  `analyzer` (section 4 of `analyzer/CLAUDE.md`). No decryption, no keys.
+- **The model bundle is read-only** and selected by `MODEL_BUNDLE`; a v2 bundle replaces
+  v1 with no code change.
+- **Code style:** short lowercase names, no semicolon-stacked one-liners, plain dicts and
+  lists (`dataset/CLAUDE.md` section 10). Heavy local steps run with `nice -n 10`.
+- **Secrets** live only in the Vercel dashboard or a local, gitignored `.env`. Never in
+  chat or the repo.
+- **Commits:** one subject line (`app: ...`), no body, no trailer. Commit and push after each
+  of steps 2 to 7 with a status line in section 12.
+
+## 2. Vercel Hobby constraints (checked against vercel.com/docs on 2026-09-28)
+
+| constraint | value (docs) | design |
+|---|---|---|
+| request and response body | 4.5 MB max (`/docs/functions/limitations`, "Request body size"; 413 `FUNCTION_PAYLOAD_TOO_LARGE`) | pcaps go from the browser straight to Vercel Blob (client upload, `/docs/vercel-blob/client-upload`); the API only receives the blob URL. Upload limit `UPLOAD_LIMIT_MB`, default 100 |
+| duration | Hobby: 300 s default and maximum (fluid compute) | the analysis runs inside one request; the largest supported capture is measured (section 9) and larger ones are rejected before parsing with a clear message |
+| memory / CPU | Hobby: 2 GB / 1 vCPU, not configurable | peak memory measured per packet; the packet limit keeps the peak under 1.5 GB |
+| bundle | Python: 500 MB uncompressed (`/docs/functions/runtimes/python`) | runtime dependencies only (numpy, zstandard, fastapi, pydantic, sqlalchemy, psycopg); no lightgbm, scikit-learn, pandas or pyarrow at runtime (section 4); `excludeFiles` drops the dataset, lab and web sources. Measured size in section 12 |
+| WebSockets, background | WebSockets are only a public beta; nothing may run after the response | no WebSockets: progress is stored in Postgres and polled with backoff |
+| disk | no persistent disk; `/tmp` is writable scratch (its size is not stated in the Vercel docs; AWS Lambda's default of 512 MB is assumed) | Postgres on Neon (Vercel Marketplace): `DATABASE_URL` is the pooled PgBouncer string, `DATABASE_URL_UNPOOLED` the direct one (neon.com Vercel-managed integration docs). SQLAlchemy uses `NullPool` (one connection per request, no long-lived pool). Migrations (Alembic) run from the owner's machine or CI against `DATABASE_URL_UNPOOLED`, never at function start. Captures live in Blob and are downloaded to `/tmp` for the request |
+| Python runtime | 3.12 default; FastAPI zero-config preset; `tool.vercel.entrypoint` in `pyproject.toml`; a Build Command in `vercel.json` takes precedence; files in `public/` are served from the CDN | one project rooted at the repository root. `pyproject.toml` sets `entrypoint = "app.api.index:app"`, so the function imports `analyzer/` directly (no copy). The build command builds `app/web` into `public/` and verifies the model bundle. `vercel.json` rewrites deep links to `/index.html` |
+| Blob | client uploads need `BLOB_READ_WRITE_TOKEN` to sign client tokens; private stores are read with `Authorization: Bearer <token>` | the API signs client-upload tokens itself (the `handleUpload` protocol of `@vercel/blob`, reimplemented in Python) and reads private blobs with the token |
+| runtime binaries | no system packages | the inference path is pure Python plus wheels: no tshark, zstd binary or libgomp (section 4) |
+
+## 3. Architecture
+
+```
+browser (React, Vercel CDN: public/)
+   | 1. POST /api/uploads      -> client token          (Blob mode)
+   | 2. PUT file -> Vercel Blob (direct, up to UPLOAD_LIMIT_MB)
+   | 3. POST /api/analyses {urls} -> runs the analysis in this request (<= 300 s)
+   | 4. GET /api/analyses/{id} (polled with backoff by other views)
+   v
+FastAPI (app/api, one Vercel Function)
+   storage adapter: blob | local        db adapter: Postgres (Neon | local Docker)
+   analyzer (repo analyzer/, pure inference) -> contract (app/schema, v1)
+   rules engine (app/api/rules) -> findings, risk scores, threat matrix
+```
+
+- **Adapters.** `STORAGE=blob|local`: blob uses Vercel Blob; local stores files under
+  `LOCAL_STORAGE_DIR` and accepts uploads at `PUT /api/uploads/local/{name}` (local mode
+  only). The database is always PostgreSQL through `DATABASE_URL` (Neon on Vercel, Docker
+  locally). The same code runs in both places.
+- **Model bundle.** `models/v1` is vendored at `app/api/models/v1` with its `SHA256SUMS`;
+  the build command and the API's first load check every checksum. `MODEL_BUNDLE`
+  (default `app/api/models/v1`) selects it. `/api/model` and the UI show its version and
+  commit.
+- **Access key.** Uploading and starting analyses need `APP_ACCESS_KEY` (header
+  `x-access-key`) when it is set, so a public deployment cannot be used by anyone to fill
+  the Blob store (the Blob docs require authenticating client-token requests). Unset
+  locally.
+
+## 4. Analyzer inference path (pure Python)
+
+`analyzer.cli` today imports lightgbm and scikit-learn (through `bundle.py` and `ml.py`) and
+decompresses `.zst` with the `zstd` binary. On Vercel, lightgbm's wheel needs the system
+OpenMP library and the binary is absent. Fix, without changing model behaviour:
+- `analyzer/lgbm.py`: a numpy evaluator of LightGBM text models (numerical splits, missing
+  value handling, binary, multiclass and cross-entropy outputs). A test checks it against
+  lightgbm on every cached window and config row (max difference below 1e-9).
+- `analyzer/calib.py`: the isotonic helpers (`ml.py` imports them from there).
+- `analyzer/parse.py` decompresses `.zst` with the `zstandard` wheel.
+- `bundle.load` and `cli` use only these. The parser, bundle and CLI tests must still pass.
+
+Extra observed facts for the rules (additive, the output shape is unchanged: `config` is a
+map from fact name to fact): IKE exchanges, IKEv1 aggressive mode, IKEv1 authentication
+method, IKE payload types (for example CERTREQ), IKE retransmissions, AH packets, ESP
+plaintext share (NULL encryption), duplicate ESP sequence numbers (replay), rekey times.
+
+## 5. Contract (app/schema)
+
+- `app/schema/v1.py`: pydantic models of the analyzer result, `schema_version =
+  "antardrishti.result/1"`. `app/schema/result.v1.json` is the exported JSON Schema.
+- It matches `analyzer.cli` output: inputs, bundle, counts, timing, and per tunnel:
+  handshake status, endpoints, config facts (value, confidence, source: `read from IKE`,
+  `observed`, `inferred`), byte share with error bars, rounded byte share (sums to 100),
+  active-time share, window timeline with per-window presence probabilities and shares.
+- Tests validate real CLI output of the kept test captures in `~/antar-data/keep`.
+
+## 6. Rule engine (app/api/rules)
+
+- `table.py`: one readable row per check (id, title, standard, fact(s), thresholds, verdict
+  and severity per value, threat ids, recommendation). Thresholds are data, not code.
+- `engine.py`: evaluates the table on the result; every finding carries check id,
+  verdict (`pass`, `fail`, `warn`, `info`, `not determinable`), severity (critical, high,
+  medium, low, info), cited standard, evidence (fact, value, source), and confidence = the
+  lowest confidence of the facts it rests on. Below 0.8 the wording says "likely".
+- Not yet observable facts (PFS without a rekey, ESP AES key size, ESN, replay window)
+  give "not determinable" findings, never guesses.
+- Risk score 0-100 per tunnel and overall (`risk.py`). Severity weights: critical 40,
+  high 20, medium 8, low 3, info 0, each times the finding's confidence; the sum is capped
+  at 100; a confident critical (confidence at least 0.8) sets the floor to 90. Overall =
+  the worst tunnel.
+- Threat matrix (`threats.py`): threat, likelihood (1-5), impact (1-5), affected tunnels,
+  linked findings.
+- Standards: RFC 8221 (ESP/AH algorithms), RFC 8247 (IKEv2 algorithms), NIST SP 800-77r1
+  (IPsec guide), RFC 4303 section 2.7 (TFC padding, for metadata exposure).
+
+## 7. Backend (app/api)
+
+- FastAPI app in `app/api/index.py` (`app`), SQLAlchemy 2, Alembic (`app/api/migrations`).
+- **Tables:** analyses (status, progress, stage, error, source, name, urls, sizes, bundle
+  version, timings, schema version, risk), tunnels, config_facts, windows, session_shares,
+  findings, risk_scores, threats, replay_chunks.
+- **Endpoints:** `POST /api/uploads` (Blob client token; the `handleUpload` protocol),
+  `PUT /api/uploads/local/{name}` (local mode), `POST /api/analyses` (from blob URLs or a
+  demo; runs the analysis in the request), `GET /api/analyses`, `GET /api/analyses/{id}`,
+  `.../tunnels`, `.../tunnels/{tid}`, `.../findings`, `.../threats`, `.../report`,
+  `GET /api/demos`, `POST /api/replays`, `POST /api/replays/{id}/next`, `GET /api/health`,
+  `GET /api/model`, `GET /api/config`.
+- **Demo replay:** live capture can't run on Vercel. A replay feeds a stored demo capture
+  to the API in successive 5 s chunks: each `next` call appends the next chunk to
+  `replay_chunks` (Postgres), re-analyses all chunks so far and replaces the analysis'
+  tunnels, facts, findings and scores, so confidence rises as evidence accumulates. The
+  UI labels it a replay.
+- **Demos:** 3 small test-split captures in `app/api/demo/` (a mixture, a WhatsApp replay
+  run, an edge case), each a single pcap with the full IKE packets merged in, under the
+  upload limit, analysable with one click. The WhatsApp one is derived from ITC-Net
+  (CC BY 4.0), attributed in `app/api/demo/README.md`.
+
+## 8. Frontend (app/web)
+
+React + TypeScript (Vite), Tailwind, shadcn/ui, Apache ECharts, Framer Motion, lucide icons.
+Built into `public/` and served from the CDN.
+
+### Design brief
+
+- **Character:** a calm, dense security-analytics console. Dark first, light theme toggle.
+  Data is the hero; chrome is quiet.
+- **Palette** (CSS tokens on `:root`, dark default, light under `[data-theme=light]`):
+
+| token | dark | light | use |
+|---|---|---|---|
+| bg | `#0b0e14` | `#f7f8fa` | page |
+| surface | `#11151d` | `#ffffff` | cards |
+| surface-2 | `#171c26` | `#f1f3f6` | insets, table headers |
+| border | `#252c39` | `#e2e5eb` | hairlines |
+| text | `#e7eaf0` | `#0f1320` | primary text |
+| text-2 | `#a4acbb` | `#4a5263` | secondary text |
+| muted | `#737c8e` | `#6b7385` | captions (large text only in light) |
+| accent | `#2dd4bf` | `#0f766e` | brand, focus ring, primary buttons |
+| critical | `#ff6b6b` | `#c42b2b` | severity |
+| high | `#ff9f43` | `#b45309` | severity |
+| medium | `#f5c542` | `#8a6d00` | severity |
+| low | `#60a5fa` | `#1d5fd1` | severity |
+| info / pass | `#94a3b8` / `#34d399` | `#5b6474` / `#11804f` | severity, verdicts |
+
+  Severity chips are the severity colour on a 14% tint of itself, so the text keeps AA
+  contrast in both themes; severity never relies on colour alone (icon and label).
+- **App colours** (charts, fixed order, never cycled; the validated reference palette):
+  voip `#3987e5`, video `#d95926`, web `#199e70`, email `#c98500`, icmp `#d55181`, bulk
+  `#008300`, chat `#9085e9` in dark (light: `#2a78d6`, `#eb6834`, `#1baf7a`, `#eda100`,
+  `#e87ba4`, `#008300`, `#4a3aa7`); unknown is neutral grey `#6b7385`.
+- **Type:** Inter for UI, JetBrains Mono for numbers, IDs and hashes (tabular figures).
+  Scale 12 / 13 / 14 (body) / 16 / 20 / 24 / 32 / 44 (gauge value); weights 400, 500, 600.
+- **Layout:** fixed left sidebar 232 px (collapses to icons below 1280 px), top bar 56 px,
+  content max 1600 px, 12-column grid with 24 px gutters (16 px below 1280), 8 px spacing
+  unit, card radius 12 px, 1 px borders instead of shadows in dark.
+- **Components:** AppShell, Sidebar, TopBar (bundle version, theme toggle), Card,
+  StatTile, RiskGauge, SeverityBadge, VerdictBadge, ConfidenceBadge, SourceBadge,
+  DataTable, Tabs, Skeleton, EmptyState, ErrorState, Dropzone, UploadProgress,
+  StatusSteps, ShareBar (stacked bar to 100% with error whiskers and unknown), ActiveBars,
+  WindowTimeline, ThreatHeatmap, FindingCard, FindingDrawer, ReplayBanner, Toaster.
+- **Motion:** 150-250 ms fades and height transitions, reduced when
+  `prefers-reduced-motion`.
+- **Accessibility:** every control reachable by keyboard with a visible focus ring, charts
+  have text equivalents (tables or labels), WCAG AA contrast for text in both themes.
+- **Numbers:** shares shown with largest-remainder rounding to 100; error bars clipped to
+  0-100; confidence as a percentage with "likely" below 80%.
+
+### Pages
+
+Overview (inventory, overall risk gauge, critical alerts, recent analyses); Upload
+(drag-and-drop to Blob with progress, then polled status); Tunnel detail (handshake,
+config facts with confidence and source, byte share bar to 100% with error bars and
+unknown, active-time bars with an overlap note, window timeline, findings); Threat matrix
+(likelihood x impact heatmap, drill-down); Replay (demo replay, labelled); Reports
+(executive and technical, print stylesheet to PDF in the browser, every number from the
+API).
+
+## 9. Limits measured locally
+
+The largest capture that fits: measured by `app/tests/test_timing.py` on the largest kept
+capture, with the time scaled for Vercel's single vCPU and peak memory measured. Recorded
+in section 12 and in `DEPLOY.md`.
+
+## 10. Deployment
+
+`vercel.json` (build, function config, rewrites), `pyproject.toml` (runtime dependencies,
+entrypoint), `.env.example` (every setting), `DEPLOY.md` (the owner's manual steps:
+project, Neon, Blob, env vars in the dashboard, migrations), `DEMO.md` (local run: docker
+compose Postgres, uvicorn, Vite).
+
+## 11. Plan
+
+1. Spec (this file). 2. Contract and pure inference. 3. Rule engine. 4. Backend.
+5. Frontend. 6. Deployment files. 7. Tests, timing, screenshots.
+
+## 12. Status (checkpoints)
+
+- **Step 0-1 (2026-09-28).** Spec written; repository at `12fb01f`; Vercel constraints
+  checked against the docs (section 2).
