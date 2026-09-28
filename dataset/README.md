@@ -104,19 +104,19 @@ reuse), linked by `group`.
 
 | | |
 |---|---|
-| ok runs | **192** of 192 planned: 48 anchor (6 single apps x 8 configs), 80 mixtures (10 combos x 8 configs), 32 live chat, 8 realism (internet), 24 edge (e19 to e26 x 3); the 16 WhatsApp replay runs are skipped (no pcaps) |
-| attempts | 208: the 16 extra are realism attempts retried after a YouTube bot check |
-| split | 142 train / 50 test (per tunnel for the traffic stages, per run for edge) |
-| origin | 184 lab, 8 internet (realism), 0 replayed |
-| capture window | 19:43 to 22:29 UTC, 2 codespaces of the account `sathwik34` (4 cores each), one lab per machine (`--labs 1`), `--slice 1/2` and `--slice 2/2`, code `e58bbf9` |
-| timing | every traffic run (168: anchor, mixtures, chat, realism) was captured alone on its machine: `timing_valid` true, concurrency 1, mean machine CPU 10.7%; the 24 edge runs are `timing_valid` false |
+| ok runs | **208** of 208 planned: 48 anchor (6 single apps x 8 configs), 80 mixtures (10 combos x 8 configs), 32 live chat, 16 WhatsApp replay (8 chat, 8 voip), 8 realism (internet), 24 edge (e19 to e26 x 3) |
+| attempts | 224: the 16 extra are realism attempts retried after a YouTube bot check |
+| split | 154 train / 54 test (per tunnel for the traffic stages, per run for edge; the WhatsApp chunks also per source file) |
+| origin | 184 lab, 8 internet (realism), 16 replayed (WhatsApp) |
+| capture window | 19:43 to 22:29 UTC, 2 codespaces of the account `sathwik34` (4 cores each), one lab per machine (`--labs 1`), `--slice 1/2` and `--slice 2/2`, code `e58bbf9`; the WhatsApp replay on 2026-09-28, 01:21 to 01:48 UTC, on the first codespace |
+| timing | every traffic run (184: anchor, mixtures, chat, WhatsApp, realism) was captured alone on its machine: `timing_valid` true, concurrency 1 (mean machine CPU 10.7% over the 168 runs of 2026-09-27); the 24 edge runs are `timing_valid` false. The WhatsApp runs' inner timing is that of the original phone networks (see below) |
 | ipsec | kernel XFRM backend, strongSwan 5.9.13, no unsupported algorithms, netem available |
 | images | the P0 pins from ghcr.io (`lab/images.lock`) and the media snapshot `1d265727`, recorded in every run |
 | netem | lan 44, broadband 47, mobile 32, congested 45 (non-edge runs; edge runs are lan) |
 | capture start | 56 before_tunnel, 112 mid_stream traffic runs (67%) |
-| size | 1.32 GB compressed |
-| storage | draft releases `p1-slice1` and `p1-slice2` (one per slice) and `p1-data` (the merged tier), each archive with its `.sha256`, verified after download |
-| coverage | every P1 target in `coverage.md` is met except live chat's two-second windows: 929 of 930 |
+| size | 1.32 GB compressed, plus 0.10 GB of WhatsApp replay |
+| storage | draft releases `p1-slice1` and `p1-slice2` (one per slice), `p1-data` (the merged tier of 192 runs) and `p1-whatsapp` (the 16 replay runs, the chunk manifest and exclusion list), each file with its `.sha256`, verified after download |
+| coverage | every P1 target in `coverage.md` is met; live chat alone has 929 two-second windows, the chat class (live chat and the WhatsApp chat replays) 1,229 |
 
 **Design.** P1 follows the approved plan changes (`dataset/CLAUDE.md`, section 5): the
 mixtures on 8 configs (one per ESP wire shape x mode) at 90 s, an anchor set of the six
@@ -125,8 +125,21 @@ runs were captured with 3 parallel labs), live chat at 60 s, 8 realism runs and 
 edge cases. Each slice ran its share in a seeded random order, so run type is not tied to
 time of capture.
 
-**Gaps.** *WhatsApp replay:* `dataset/external/whatsapp/` holds no pcaps, so its 16 runs
-are skipped (never synthesized). *YouTube:* every realism attempt from the codespaces'
+**WhatsApp replay (2026-09-28).** The 16 planned runs replay public WhatsApp captures
+(ITC-Net-Blend-60 and ITC-Net-Audio-5, CC BY 4.0; attribution below) through the tunnel:
+8 replay chat chunks (messaging and media) and 8 voip chunks (calls), 80 s each, every
+chunk of a source file in one split (Blend-60 scenario B and one Audio-5 device are
+test). Each run records `replayed: true`, `label`, `source` and `replay` (DOI, scenario,
+device, split, source file, offsets, chunk sha256, checked before the replay). The
+replay keeps the capture's inter-packet timing, so **the WhatsApp runs' timing reflects
+the original phone networks** (the ISPs, places and phones of the ITC captures:
+Blend-60 in 2021-11 and 2021-12, Audio-5 in 2023-03) under the lab's netem profile, not
+a live WhatsApp session. The replay is not stateful (no endpoint answers it) and cannot
+adapt packet sizes to the tunnel: in one run (`p1-whatsapp-da7d0955-r1`: sha384, IPv6
+outer, NAT-T, the largest overhead) gw_b IPv6-fragmented 534 large ESP packets, which
+the ESP count and the labels miss (fragments count as `other`).
+
+**Gaps.** *YouTube:* every realism attempt from the codespaces'
 datacenter addresses got YouTube's bot check; after the normal retries each realism run
 keeps its web traffic and records the block (`observed.blocked`), so the realism runs
 hold no YouTube video. *Chat windows:* 929 of the 930 minimum; each chat run is its own
@@ -159,3 +172,37 @@ Can a model tell traffic captured with one lab on the machine from traffic captu
 - pre-registered rule: pass if auc < 0.6 and permutation p >= 0.05 (overall and per class) -> **failed**: concurrency must be lowered and retested
 - caveat: the serial half ran before the parallel half (not interleaved), so slow drift of the host's own load over those hours is confounded with the condition
 <!-- advval:end -->
+
+<!-- attribution:start -->
+## Third-party data and attribution
+
+The WhatsApp replay runs (P1 stage `whatsapp`) are derived from two public datasets,
+used under the Creative Commons Attribution 4.0 International licence (CC BY 4.0,
+https://creativecommons.org/licenses/by/4.0/):
+
+- **ITC-Net-Blend-60.** M. Bayat, J. Garshasbi, M. Mehdizadeh, N. Nozari, A. Rezaei Khesal,
+  M. Dokhaei and M. Teimouri (ITC Laboratory, University of Tehran), "ITC-Net-Blend-60: A
+  Comprehensive Dataset for Robust Network Traffic Classification in Diverse
+  Environments", Mendeley Data, 2024. Scenarios A to E: doi:10.17632/ssv23kfcgs.3,
+  doi:10.17632/3zggb53m4x.3, doi:10.17632/gp8r347j38.3, doi:10.17632/mcmf627yh5.3,
+  doi:10.17632/gdtnnfyr7s.3 (supplementary materials doi:10.17632/4sgt9tjs4w.7);
+  described in BMC Research Notes (2024), doi:10.1186/s13104-024-06817-5. Used: the
+  WhatsApp Messenger archive of each scenario.
+- **ITC-Net-Audio-5.** M. Nikbakht and M. Teimouri (ITC Laboratory, University of
+  Tehran), "ITC-Net-Audio-5: An Audio Streaming Dataset for Application Identification in
+  Network Traffic Classification", figshare, 2024, doi:10.6084/m9.figshare.24721035.v2;
+  described in BMC Research Notes (2024), doi:10.1186/s13104-024-06718-7. Used: the
+  WhatsApp voice-call files.
+
+**Changes made.** Only the WhatsApp files were used. Their traffic was labelled (sustained
+UDP media flows as voip calls, the rest of a Blend-60 file as chat) and cut into 80 s
+chunks, short or sparse pieces excluded; every chunk, its source file and offsets are
+listed in `dataset/external/whatsapp/manifest.jsonl` (`tools/whatsapp_prep.py`). Each
+replayed chunk had its IP and MAC addresses rewritten to the lab's and was replayed
+through the lab's IPsec tunnels, under the lab's netem profiles, and captured again: the
+dataset holds those new captures (outer ESP, inner headers), not the original files. The
+original authors do not endorse this dataset or its use.
+
+The media served by the lab itself (films, mirrored web pages) carry their own licences,
+listed in `lab/ATTRIBUTION.md`.
+<!-- attribution:end -->

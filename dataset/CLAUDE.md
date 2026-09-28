@@ -366,6 +366,69 @@ PCAPdroid and drops the pcaps into `dataset/external/whatsapp/`. To replay:
 If the folder is empty, skip those runs and report the gap in `coverage.md`. **Never
 synthesize fake WhatsApp traffic.**
 
+**WhatsApp source (owner decision, 2026-09-28).** Instead of phone captures, the replay
+uses two public CC BY 4.0 datasets of the ITC lab, University of Tehran (their packet
+timestamps date Blend-60 to November and December 2021 and Audio-5 to March 2023):
+- ITC-Net-Blend-60, the WhatsApp Messenger archive of all five scenarios (Mendeley: A
+  10.17632/ssv23kfcgs.3, B 10.17632/3zggb53m4x.3, C 10.17632/gp8r347j38.3, D
+  10.17632/mcmf627yh5.3, E 10.17632/gdtnnfyr7s.3): 22 files, 2.6 h.
+- ITC-Net-Audio-5, the WhatsApp voice-call files (figshare
+  10.6084/m9.figshare.24721035.v2): 100 files, 6.1 h.
+
+`tools/whatsapp_prep.py` labels and cuts them. A sustained UDP media flow (at least 20 s
+at 20 packets/s or more: UDP 3478 relays or peer to peer) is a call, labelled **voip**;
+the rest of a Blend-60 file, 5 s away from any call, is messaging and media, labelled
+**chat**; the call setup and teardown of an Audio-5 file are excluded. Each segment is
+cut into 80 s chunks (a 90 s run leaves about 85 s for the replay after the tunnel setup,
+so a chunk replays whole); a chunk under 30 s or with fewer than 150 packets is excluded.
+Every source is Ethernet, so no link-type conversion is needed; the replay rewrites
+addresses and MACs per run. Result: 59 chat chunks (1.27 h, 17 Blend-60 files),
+43 voip chunks from Blend-60 calls (0.93 h, 10 files) and 274 voip chunks from
+Audio-5 (5.37 h, all 100 files); 63 pieces excluded (48 remainders under 30 s,
+15 sparse chunks). `dataset/external/whatsapp/manifest.jsonl` lists every chunk (source,
+DOI, scenario, device, split, source file, offsets, label, packets, sha256),
+`excluded.jsonl` the rest.
+
+*Split by source.* Every chunk of a source file shares its split: Blend-60 scenario B (one
+user, one phone, two ISPs) is test, scenarios A, C, D and E train; Audio-5 has no
+scenarios, so its files are kept together by capturing device (hotspot address), and the
+device 192.168.137.218 (20 of 100 files) is test. A test run replays only test sources.
+
+*Runs.* The 16 planned `whatsapp` runs (no plan change): 8 replay chat chunks and 8 voip
+chunks, two of each per wire shape and 2 of each among the 4 test runs
+(`plan.replay_labels`). Voip runs alternate between the two datasets, and the runs of one
+(label, split) take different source files (16 source files in all), preferring full
+80 s chunks. The replay checks each chunk's sha256 first, and every run records
+`replayed: true`, `label`, `source` and `replay` (DOI, scenario, device, split, source
+file, offsets, chunk, sha256) in its meta.json.
+
+Blend-60 mapping:
+
+| file | split | call (s) | chat chunks | voip chunks | excluded |
+|---|---|---|---|---|---|
+| A_1 | train | - | 3 | 0 | 0 |
+| A_2 | train | 8 to 544 | 0 | 7 | 2 |
+| A_3 | train | - | 5 | 0 | 2 |
+| A_4 | train | - | 1 | 0 | 4 |
+| B_1 | test | 3 to 277 | 0 | 4 | 1 |
+| B_2 | test | - | 6 | 0 | 0 |
+| B_3 | test | - | 3 | 0 | 0 |
+| C_1 | train | 269 to 429 | 3 | 2 | 3 |
+| C_2 | train | 171 to 331 | 3 | 2 | 4 |
+| C_3 | train | 189 to 429 | 2 | 3 | 3 |
+| C_4 | train | - | 7 | 0 | 0 |
+| D_1 | train | - | 4 | 0 | 2 |
+| D_2 | train | 21 to 661 | 0 | 8 | 3 |
+| D_3 | train | 27 to 563 | 0 | 7 | 2 |
+| D_4 | train | - | 7 | 0 | 2 |
+| D_5 | train | 0 to 235 | 1 | 3 | 1 |
+| D_6 | train | 260 to 572 | 3 | 4 | 1 |
+| D_7 | train | 14 to 253 | 0 | 3 | 1 |
+| D_8 | train | - | 3 | 0 | 1 |
+| E_1 | train | - | 3 | 0 | 0 |
+| E_2 | train | - | 2 | 0 | 1 |
+| E_3 | train | - | 3 | 0 | 2 |
+
 ### Per-run randomization (seeded, recorded in meta)
 
 - **netem profile**, drawn uniformly from `netem.yaml`:
@@ -666,7 +729,8 @@ merge with `tools/merge.py`. Then `coverage.py` must pass P0.
   - known limitations (virtual network, self-hosted services, replayed traffic isn't
     stateful)
 - **Scope:** capture only lab traffic and the user's own test-device traffic. No third-party
-  or personal data. WhatsApp captures come from a dedicated test account.
+  or personal data. WhatsApp replay uses the public ITC captures instead (owner decision
+  2026-09-28, CC BY 4.0, attributed; section 5).
 - **Lab keys** are throwaway test credentials stored only for ground truth. Never reuse them
   anywhere else.
 - **Storage:** check `du -sh dataset/raw` after every batch. Warn the user when the
@@ -868,7 +932,18 @@ manifest lines were pushed.
 | a relaunch guard matched its own ssh command line | nothing launched | check and launch in separate commands | - |
 | large lan bulk captures (up to 560 MB raw) took 10 to 15 minutes to analyse | slower slices | none needed (P0: up to 784 s) | - |
 
-**Open items.** Chat windows: 929 of 930 (accept, or capture more chat). WhatsApp replay
-once test-phone pcaps exist; YouTube from a non-datacenter address. P0 and P1 labels and
-the decryption spot-check (phase 5). The serial recapture of the P0 traffic runs.
+**WhatsApp replay (2026-09-28).** The 16 planned `whatsapp` runs, captured on the
+maintainer codespace with `--labs 1` from 01:21 to 01:48 UTC: 16/16 ok on the first
+attempt (8 chat, 8 voip; 4 test), from the public ITC captures (section 5: sources,
+labels, split by source, mapping). Every replay ran whole (`tcpreplay` rc 0) and every
+chunk passed its sha256 check. Backed up in the draft release `p1-whatsapp` (the runs,
+the chunk manifest and exclusion list, each with its `.sha256`, verified after download).
+The runs record code `fcc19e1` (HEAD when they ran); the code that ran was the working
+tree committed right after as `f169b05` (unchanged since the batch started). In one run
+(sha384, IPv6 outer, NAT-T) gw_b IPv6-fragmented 534 large ESP packets: a replay cannot
+adapt packet sizes to the tunnel, and fragmented ESP is counted as `other`.
+
+**Open items.** Chat windows: live chat 929 of 930 (the chat class meets it with the
+WhatsApp chat replays). YouTube from a non-datacenter address. P0 and P1 labels and the
+decryption spot-check (phase 5). The serial recapture of the P0 traffic runs.
 
