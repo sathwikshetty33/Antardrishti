@@ -178,9 +178,10 @@ def p1_rows(rows, ok, allrun, notok):
         row(rows, "p1", f"mixture {sc}", ">= 8 ok, in test", f"{len(rs)} ok, {test} test", len(rs) >= 8 and test >= 1,
             notok([r for r in allrun if r["scenario"] == sc]))
 
-    # live chat (xmpp, 60 s runs) and whatsapp replay count together as the chat class
+    # live chat (xmpp, 60 s runs) and the whatsapp replay runs labelled chat count
+    # together as the chat class (whatsapp call chunks are labelled voip)
     na = len(plan.cross(plan.matrix["set_a"]))
-    rs = [m for m in ok if m["stage"] in ("chat", "whatsapp")]
+    rs = [m for m in ok if m["stage"] == "chat" or (m["stage"] == "whatsapp" and m.get("label") == "chat")]
     w = sum(win(m) for m in rs)
     cfgs = {akey(m["config"]) for m in rs}
     test = [m for m in rs if m["split"] == "test"]
@@ -189,6 +190,20 @@ def p1_rows(rows, ok, allrun, notok):
     row(rows, "p1", "app chat: 2 s windows", f">= {p1_chat_windows}", w, w >= p1_chat_windows)
     row(rows, "p1", "app chat: set-A configs covered", f">= 90% of {na}", f"{len(cfgs)}/{na}", len(cfgs) >= 0.9 * na)
     row(rows, "p1", "app chat: test runs", ">= 8", len(test), len(test) >= 8)
+
+    pr = [r for r in allrun if r["stage"] == "whatsapp" and not r.get("skip")]
+    if pr:
+        rs = [m for m in ok if m["stage"] == "whatsapp"]
+        lab = Counter(m.get("label") for m in rs)
+        test = Counter(m.get("label") for m in rs if m["split"] == "test")
+        want = Counter(r["replay_label"] for r in pr)
+        prov = [m for m in rs if m.get("source") and all((m.get("replay") or {}).get(k) is not None
+                                                          for k in ("doi", "source_file", "start_s", "end_s", "sha256"))]
+        row(rows, "p1", "whatsapp replay: ok runs", f"{len(pr)} ({want['chat']} chat, {want['voip']} voip)",
+            f"{len(rs)} ({lab['chat']} chat, {lab['voip']} voip)", len(rs) >= len(pr) and lab == want, notok(pr))
+        row(rows, "p1", "whatsapp replay: test runs", ">= 1 chat, >= 1 voip", f"{test['chat']} chat, {test['voip']} voip",
+            test["chat"] >= 1 and test["voip"] >= 1)
+        row(rows, "p1", "whatsapp replay: provenance recorded", "all", f"{len(prov)}/{len(rs)}", len(prov) == len(rs))
 
     pr = [r for r in allrun if r["stage"] == "realism"]
     rs = [m for m in ok if m["stage"] == "realism"]

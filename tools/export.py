@@ -27,10 +27,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tier", required=True)
     ap.add_argument("--slice")
+    ap.add_argument("--stage", help="only this stage's runs (e.g. whatsapp -> p1-whatsapp-<code>)")
     ap.add_argument("--out", default=str(root / "dataset" / "export"))
     a = ap.parse_args()
     runs = plan.build(a.tier)
     tag = a.tier
+    if a.stage:
+        runs = [r for r in runs if r["stage"] == a.stage]
+        tag += f"-{a.stage}"
     if a.slice:
         i, n = (int(x) for x in a.slice.split("/"))
         runs = plan.deal(runs, i, n) if a.tier not in plan.legacy else plan.slice_units(runs, i, n)
@@ -42,7 +46,8 @@ def main():
         if l.strip():
             m = json.loads(l)
             # extra edge reps (--fill-gaps) are not in the plan: a slice packs the ones it captured
-            extra = m.get("edge_case") and m["run_id"] not in base and (not a.slice or (raw / m["run_id"]).exists())
+            extra = (m.get("edge_case") and m["run_id"] not in base and not a.stage
+                     and (not a.slice or (raw / m["run_id"]).exists()))
             if m["tier"] == a.tier and (m["run_id"] in want or extra):
                 if "annotation" not in m:
                     last[m["run_id"]] = m["status"]
