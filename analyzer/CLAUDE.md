@@ -334,3 +334,12 @@ the HTTPS packets are `ambiguous:<apps>`. The schedule's app intervals resolve o
   F1 0.851 (voip 0.996, chat 0.951, icmp 0.928, video 0.797, web 0.786, email 0.751, bulk
   0.747); session share MAE 4.4 pp. Out of distribution: realism web read mostly as bulk,
   WhatsApp chat read as email, WhatsApp voip fine.
+- **Phase E done (2026-09-28).** `models/v1` (17 boosters, calibration and thresholds,
+  schema, overhead table, error table, metadata, SHA256SUMS) built at `a88b2a4`; CLI
+  `python -m analyzer.cli analyze`, 0.32 s per minute of traffic; 28 tests pass (parser vs
+  tshark, bundle, CLI equal to the evaluation on 3 test runs). Draft release `models-v1`:
+  `models-v1-a88b2a4.tar.zst`, sha256
+  `78d5a6c5379b7c48a45d52cf56ebbcbee79772f5d2ad7f181aafe9bfef0e6fde`, verified by
+  re-download (archive and inner manifest). Whole job about 51 minutes wall clock on the
+  owner's machine; peak process memory 1.6 GB (1.2 GB after the parser's memory fix),
+  system memory at most 69%.
