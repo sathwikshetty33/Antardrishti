@@ -309,3 +309,12 @@ the HTTPS packets are `ambiguous:<apps>`. The schedule's app intervals resolve o
 - **Future fix** (capture, not yet implemented): separate server addresses for video
   and web, recorded in `dataset/CLAUDE.md` (section 12, open items). The rejected
   alternative was flow attribution by the generators' logged events (about 0.5 h).
+
+## 12. Status (checkpoints)
+
+- **Phase A done (2026-09-28).** Parser, features, prep. Every ok run of P0 (370), p0s (192),
+  P1 (192) and WhatsApp (16) is cached under `features/<tier>/` (esp packet table and
+  tunnel rows). Label rows align with the parsed captures in every run; direction agrees
+  with the labels on every packet; all p0s splits and configs equal their P0 twins'. Peak
+  prep memory 1.2 GB (one worker). Resume: `python -m analyzer.prep --tier <t>` skips
+  cached runs.
