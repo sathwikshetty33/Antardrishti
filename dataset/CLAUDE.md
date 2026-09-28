@@ -492,6 +492,31 @@ edge cases are not timing-sensitive: `timing_valid: false`, and they may share l
   set for internet runs and removed by the reset before every other run, which keeps
   P0's lab network (no DNS, lan_a to lan_b selectors) exactly.
 
+**p0s: the P0 traffic runs recaptured serially (owner decision, 2026-09-28)**
+- **Runs:** the 192 P0 traffic runs again. Each p0s run is the paired twin of one P0
+  traffic run, and records its P0 run_id as `recapture_of` in meta.json.
+- **Kept from the twin:**
+  - the set-A tunnel config (drawn from P0's seed), app and 90 s duration;
+  - the tunnel reuse and app order, so capture_start matches: 32 before_tunnel, 160
+    mid_stream;
+  - the netem profile and noise;
+  - the split: P0's 8 test tunnels, one per wire shape × mode.
+- **What differs:** only the run seed (tier seed 26004, recorded) and the capture
+  concurrency. `plan.build("p0s")` copies the rest from `plan.build("p0")` (`like: p0`
+  in `capture/matrix.yaml`).
+- **Not recaptured:** short, handshake and edge runs.
+- **Concurrency:** `--labs 1`, so every run is alone on its machine and records
+  `timing_valid: true`. P0's traffic runs stay in the dataset, annotated
+  `timing_valid: false`. The `p0-data` release is never modified.
+- **Keys:** during each capture both gateways' `ip -s xfrm state` is dumped every 10 s
+  into `xfrm_<gw>_periodic.txt`, besides the start and end dumps that validation reads,
+  so an SA rekeyed away keeps its keys (the phase 5 lesson). Every run from p0s on has
+  these files, and `tools/labels.py` reads them.
+- **Lab:** exactly as in P1. No offload, network or image changes.
+- **Slices:** `plan.deal` into 2 slices of 16 tunnels, in seeded order. Design
+  fingerprint `ed9e524368e5e9a7`, plan `6954551793740594`; P1's lines keep their own
+  design (merge per tier).
+
 **P2 (only if quota remains)**
 - A second rep of P0 traffic with a different seed.
 - Replay of public non-VPN pcaps (ISCX, VNAT) from `dataset/external/public/` through set

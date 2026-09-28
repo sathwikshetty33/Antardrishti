@@ -3,7 +3,7 @@
 <!-- env:start -->
 ## Environment
 
-Probed by `lab/preflight.py` on 2026-09-27.
+Probed by `lab/preflight.py` on 2026-09-28.
 
 - host kernel: `6.8.0-1064-azure`
 - docker: `29.8.1-1`
@@ -24,8 +24,8 @@ Probed by `lab/preflight.py` on 2026-09-27.
 | netem | ok | delay/jitter/loss/rate |
 | nflog policy match | ok | NFLOG + policy match, tcpdump -i nflog:5 |
 | nft raw payload match | ok | raw payload match for ike exchange type |
-| strongswan tunnel v4 (kernel) | ok | backend=kernel: 8 ike + 12 esp packets seen at router |
-| strongswan tunnel v6 (kernel) | ok | backend=kernel: 8 ike + 16 esp packets seen at router |
+| strongswan tunnel v4 (kernel) | ok | backend=kernel: 8 ike + 20 esp packets seen at router |
+| strongswan tunnel v6 (kernel) | ok | backend=kernel: 8 ike + 20 esp packets seen at router |
 | swanctl --list-algs | ok | encryption:15, integrity:15, aead:10, hasher:12, prf:10, xof:8, kdf:2, drbg:7, dh:27, rng:3, nonce-gen:1 |
 | kernel xfrm algorithms | ok | unsupported: none |
 <!-- env:end -->
