@@ -166,11 +166,12 @@ def build(tier):
         combos = st.get("combos") or [[a] for a in st["apps"]]
         if stage in ("realism", "short"):
             combos = [st["apps"]]  # one run carrying all the stage's apps
+        like = st.get("like")   # a recapture of another tier's stage: its tunnels, app order, split
         for c, inner in set_a(st["set"]):
             for rep in range(1 + rep0, st["reps"] + 1 + rep0):
                 key = json.dumps(c, sort_keys=True)
                 # one tunnel per (config, rep): drawn once, shared by every app run on it
-                rng = random.Random(f"{seed}:{stage}:{key}:{rep}")
+                rng = random.Random(f"{matrix['seeds'][like] if like else seed}:{stage}:{key}:{rep}")
                 cfg = a_config(c, rng, inner)
                 if stage == "realism":
                     cfg["internet"] = True
@@ -184,10 +185,17 @@ def build(tier):
                     r = mk(tier, stage, scen, cfg, rep, r_rng.randrange(2**31), apps, st["duration_s"],
                            replayed=stage in ("whatsapp", "public"), internet=stage == "realism",
                            skip=skip, group=group, group_pos=pos, group_size=len(combos),
-                           capture_start="before_tunnel" if pos == 0 else "mid_stream")
+                           capture_start="before_tunnel" if pos == 0 else "mid_stream",
+                           **({"recapture_of": f"{like}-{scen}-{confighash(cfg)}-r{rep}"} if like else {}))
                     randomize(r_rng, r)
                     runs.append(r)
     assign_split(runs)
+    likes = {st["like"] for st in matrix["tiers"][tier] if st.get("like")}
+    if likes:
+        split = {r["run_id"]: r["split"] for t in likes for r in build(t)}
+        for r in runs:
+            if r.get("recapture_of"):
+                r["split"] = split[r["recapture_of"]]
     replay_labels(runs)
     return runs
 
