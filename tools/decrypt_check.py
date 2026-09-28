@@ -38,7 +38,9 @@ raw = root / "dataset" / "raw"
 def uat(run_dir):
     """tshark esp_sa records for the sas in both gateways' xfrm dumps (any address: by spi)"""
     recs = []
-    for f in ("xfrm_a.txt", "xfrm_b.txt"):
+    for f in ("xfrm_a.txt", "xfrm_b.txt", "xfrm_a_periodic.txt", "xfrm_b_periodic.txt"):
+        if not (run_dir / f).exists():
+            continue
         for block in re.split(r"\n(?=src )", (run_dir / f).read_text()):
             m = re.search(r"^src (\S+) dst \S+\s+proto esp spi (0x[0-9a-f]+)", block)
             a = re.search(r"aead rfc4106\(gcm\(aes\)\) 0x([0-9a-f]+) \(\d+ bits\) (\d+)", block)

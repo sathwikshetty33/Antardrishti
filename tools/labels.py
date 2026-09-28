@@ -214,7 +214,7 @@ class Sa:
 def sas(run_dir):
     """spi -> Sa for the esp sas in both gateways' xfrm dumps"""
     out = {}
-    for f in ("xfrm_a.txt", "xfrm_b.txt"):
+    for f in ("xfrm_a.txt", "xfrm_b.txt", "xfrm_a_periodic.txt", "xfrm_b_periodic.txt"):
         if not (run_dir / f).exists():
             continue
         for block in re.split(r"\n(?=src )", (run_dir / f).read_text()):

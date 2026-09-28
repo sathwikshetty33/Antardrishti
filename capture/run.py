@@ -148,6 +148,22 @@ def xfrm_snap(d, tag):
             f.write(f"== {tag} {time.time():.3f}\n{out}\n")
 
 
+xfrm_every_s = 10
+
+
+def xfrm_tick(d, last):
+    """periodic key dumps during the capture (xfrm_<gw>_periodic.txt, apart from the
+    start and end dumps that validation reads): an sa rekeyed away before the end dump
+    keeps its keys for the labels"""
+    if time.time() - last[0] < xfrm_every_s:
+        return
+    last[0] = time.time()
+    for s in "ab":
+        _, out = dx(topo.c[f"gw_{s}"], "ip -s xfrm state", check=False)
+        with open(d / f"xfrm_{s}_periodic.txt", "a") as f:
+            f.write(f"== periodic {time.time():.3f}\n{out}\n")
+
+
 # ---------------------------------------------------------------- lab state
 
 def reset(run):
@@ -339,7 +355,9 @@ def execute_reuse(run, d, labst):
     app_len = max(5, dur - (time.time() - t0) - 2)
     evs, threads = start_apps(run, ctx, app_len, rng) if run["apps"] else ([], [])
     mark("apps_start", apps=run["apps"], length=round(app_len, 1))
+    tick = [time.time()]
     while time.time() - t0 < dur:
+        xfrm_tick(d, tick)
         time.sleep(0.5)
     for t in threads:
         t.join(timeout=60)
@@ -450,7 +468,9 @@ def execute(run, d, labst):
         evs, threads = start_apps(run, ctx, app_len, rng) if run["apps"] else ([], [])
     mark("apps_start", apps=run["apps"], length=round(app_len, 1))
     done = {}
+    tick = [time.time()]
     while time.time() - t0 < dur:
+        xfrm_tick(d, tick)
         el = time.time() - t0
         if "terminate_at_35" in st and el >= 35 and "term" not in done:
             done["term"] = dx(topo.c["gw_a"], "swanctl --terminate --ike lab --timeout 10", check=False)[0]

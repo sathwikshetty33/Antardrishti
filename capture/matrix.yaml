@@ -77,8 +77,9 @@ tiers:
     - {stage: edge, level: p0, reps: 3}
   p0s:
     # the 192 p0 traffic runs recaptured alone on the machine (--labs 1, timing_valid;
-    # owner, 2026-09-28): like: p0 keeps p0's tunnels (config draws from p0's seed),
-    # app order and split; the per-run draws (netem, noise, run seeds) use p0s's seed
+    # owner, 2026-09-28). like: p0 makes each run a paired twin of its p0 run
+    # (recapture_of): the same tunnel config, app, app order, split, netem, noise and
+    # capture_start; only the run seed (p0s's own) and the capture concurrency differ
     - {stage: traffic, set: a, apps: [voip, video, web, email, icmp, bulk], reps: 1, duration_s: 90, like: p0}
   p1:
     # every p1 traffic stage (mixtures, anchor, chat, whatsapp, realism) is captured

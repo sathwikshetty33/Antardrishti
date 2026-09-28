@@ -192,10 +192,12 @@ def build(tier):
     assign_split(runs)
     likes = {st["like"] for st in matrix["tiers"][tier] if st.get("like")}
     if likes:
-        split = {r["run_id"]: r["split"] for t in likes for r in build(t)}
+        # a recapture run is its twin's paired copy: only the run seed and concurrency differ
+        twin = {r["run_id"]: r for t in likes for r in build(t)}
         for r in runs:
             if r.get("recapture_of"):
-                r["split"] = split[r["recapture_of"]]
+                t = twin[r["recapture_of"]]
+                r.update({k: t[k] for k in ("split", "netem", "noise", "capture_start", "capture_delay_s")})
     replay_labels(runs)
     return runs
 
