@@ -68,7 +68,7 @@ ok runs: 370 (lab 370, internet 0, replayed 0)
 <!-- p1:start -->
 ## P1
 
-ok runs: 192 (lab 184, internet 8, replayed 0)
+ok runs: 208 (lab 184, internet 8, replayed 16)
 
 | level | target | minimum | actual | met |
 |---|---|---|---|---|
@@ -106,12 +106,15 @@ ok runs: 192 (lab 184, internet 8, replayed 0)
 | p1 | mixture chat_web | >= 8 ok, in test | 8 ok, 2 test | yes |
 | p1 | mixture email_bulk | >= 8 ok, in test | 8 ok, 2 test | yes |
 | p1 | mixture voip_video_web | >= 8 ok, in test | 8 ok, 2 test | yes |
-| p1 | app chat: ok runs | >= 32 | 32 | yes |
-| p1 | app chat: 2 s windows | >= 930 | 929 | **no** |
+| p1 | app chat: ok runs | >= 32 | 40 | yes |
+| p1 | app chat: 2 s windows | >= 930 | 1229 | yes |
 | p1 | app chat: set-A configs covered | >= 90% of 32 | 32/32 | yes |
-| p1 | app chat: test runs | >= 8 | 8 | yes |
+| p1 | app chat: test runs | >= 8 | 10 | yes |
+| p1 | whatsapp replay: ok runs | 16 (8 chat, 8 voip) | 16 (8 chat, 8 voip) | yes |
+| p1 | whatsapp replay: test runs | >= 1 chat, >= 1 voip | 2 chat, 2 voip | yes |
+| p1 | whatsapp replay: provenance recorded | all | 16/16 | yes |
 | p1 | realism (internet): ok runs | >= 8 | 8 | yes |
-| p1 | traffic runs captured alone (timing_valid) | all | 168/168 | yes |
+| p1 | traffic runs captured alone (timing_valid) | all | 184/184 | yes |
 | p1 | edge e19 ah | >= 3 ok, in test | 3 ok (0 mismatch), 1 test | yes |
 | p1 | edge e20 replay window off | >= 3 ok, in test | 3 ok (0 mismatch), 1 test | yes |
 | p1 | edge e21 esn | >= 3 ok, in test | 3 ok (0 mismatch), 1 test | yes |
@@ -120,14 +123,13 @@ ok runs: 192 (lab 184, internet 8, replayed 0)
 | p1 | edge e24 mixed families | >= 3 ok, in test | 3 ok (0 mismatch), 1 test | yes |
 | p1 | edge e25 ip fragmentation | >= 3 ok, in test | 3 ok (0 mismatch), 1 test | yes |
 | p1 | edge e26 replay attempt | >= 3 ok, in test | 3 ok (0 mismatch), 1 test | yes |
-| p1 | mid-stream (esp-only) captures | >= 15% of traffic runs | 112/168 = 67% | yes |
-| p1 | netem broadband | >= 15% of runs | 47/168 = 28% | yes |
-| p1 | netem congested | >= 15% of runs | 45/168 = 27% | yes |
-| p1 | netem lan | >= 15% of runs | 44/168 = 26% | yes |
-| p1 | netem mobile | >= 15% of runs | 32/168 = 19% | yes |
+| p1 | mid-stream (esp-only) captures | >= 15% of traffic runs | 112/184 = 61% | yes |
+| p1 | netem broadband | >= 15% of runs | 50/184 = 27% | yes |
+| p1 | netem congested | >= 15% of runs | 50/184 = 27% | yes |
+| p1 | netem lan | >= 15% of runs | 49/184 = 27% | yes |
+| p1 | netem mobile | >= 15% of runs | 35/184 = 19% | yes |
 
 ### Gaps
 
-- whatsapp whatsapp: no pcaps in dataset/external/whatsapp
 - youtube: blocked in 8 of 8 ok runs (recorded, never worked around)
 <!-- p1:end -->
