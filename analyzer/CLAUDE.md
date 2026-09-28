@@ -329,3 +329,8 @@ the HTTPS packets are `ambiguous:<apps>`. The schedule's app intervals resolve o
   0.741, bulk 0.686, video 0.662. Most errors are video, bulk and email confused with each
   other (all TCP downloads from the lab server). Predictions in
   `features/window_pred.parquet`.
+- **Phase D done (2026-09-28).** Aggregation and evaluation (`python -m analyzer.evaluate`,
+  82 s): `analyzer/REPORT.md` and `analyzer/report/*.png`. Lab test windows: presence macro
+  F1 0.851 (voip 0.996, chat 0.951, icmp 0.928, video 0.797, web 0.786, email 0.751, bulk
+  0.747); session share MAE 4.4 pp. Out of distribution: realism web read mostly as bulk,
+  WhatsApp chat read as email, WhatsApp voip fine.

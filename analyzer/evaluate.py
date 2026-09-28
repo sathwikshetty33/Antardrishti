@@ -39,7 +39,7 @@ def prf(y, yhat):
     tp, fp, fn = (y & yhat).sum(), (~y & yhat).sum(), (y & ~yhat).sum()
     p = tp / (tp + fp) if tp + fp else None
     r = tp / (tp + fn) if tp + fn else None
-    f = 2 * tp / (2 * tp + fp + fn) if 2 * tp + fp + fn else None
+    f = 2 * tp / (2 * tp + fp + fn) if y.any() else None
     return {"f1": f, "precision": p, "recall": r, "support": int(y.sum()), "n": int(len(y))}
 
 
@@ -512,7 +512,7 @@ def write_report(R):
          "session-share scoring; the other apps' labels in the window stay exact.", "",
          table(["mixture", "runs", "ambiguous MB", "resolved by schedule"],
                [[k, v["runs"], f"{v['ambiguous_bytes'] / 1e6:.1f}",
-                 fmt(v["ambiguous_resolved_bytes"] / v["ambiguous_bytes"], True) if v["ambiguous_bytes"] else "-"]
+                 fmt(v["resolved_bytes"] / v["ambiguous_bytes"], True) if v["ambiguous_bytes"] else "-"]
                 for k, v in sorted(R["labels"]["ambiguous"].items()) if v["ambiguous_bytes"]]), "",
          "Windows left out, per app:", "",
          table(["app", "train", "test"], [[a, v["train"], v["test"]] for a, v in R["labels"]["excluded_windows"].items()]),
