@@ -621,6 +621,14 @@ def write_report(R):
         L += ["## Environment", "", table(["", ""], [[k, v if not isinstance(v, dict) else
                                                       ", ".join(f"{a} {b}" for a, b in v.items())] for k, v in env.items()]), ""]
     (cm.root / "analyzer" / "REPORT.md").write_text("\n".join(L) + "\n")
+    head = {"suite_accuracy_all": c["suite"]["by_evidence"]["all"]["accuracy"],
+            "suite_accuracy_50": c["suite"]["by_evidence"]["50"]["accuracy"],
+            "mode_accuracy_all": c["mode"]["by_evidence"]["all"]["accuracy"],
+            "pfs_accuracy_all": c["pfs"]["by_evidence"]["all"]["accuracy"], "presence_macro_f1": macro_f1,
+            "presence_f1": {a: P[a]["all"]["f1"] for a in cm.apps},
+            "session_share_mae_pp": float(np.mean(allerr)) if allerr else None,
+            "cli_seconds_per_minute": speed["seconds_per_minute"] if speed else None}
+    (results / "headline.json").write_text(json.dumps(head, indent=1))
 
 
 if __name__ == "__main__":

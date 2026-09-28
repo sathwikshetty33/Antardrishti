@@ -401,6 +401,8 @@ Paired twins, same config, app, netem and noise; only the capture concurrency (3
 
 ## CLI
 
+`python -m analyzer.cli analyze` on 3 test runs: 0.32 s per minute of traffic (median; 0.21 to 1.42).
+
 ## Environment
 
 |  |  |
