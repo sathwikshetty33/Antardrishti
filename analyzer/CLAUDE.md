@@ -318,3 +318,8 @@ the HTTPS packets are `ambiguous:<apps>`. The schedule's app intervals resolve o
   with the labels on every packet; all p0s splits and configs equal their P0 twins'. Peak
   prep memory 1.2 GB (one worker). Resume: `python -m analyzer.prep --tier <t>` skips
   cached runs.
+- **Phase B done (2026-09-28).** Config models (`python -m analyzer.config_models`, 23 s):
+  2,746 evidence rows. Test accuracy with all packets: suite 100%, mode 95.4% (every error
+  is an icmp-only tunnel: ping sizes vary, so no fixed-size packet shows the inner header),
+  PFS 92.9% (14 test tunnels with a rekey). Out-of-fold config context in
+  `features/config_pred.parquet`.
