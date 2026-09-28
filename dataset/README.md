@@ -135,15 +135,21 @@ replay keeps the capture's inter-packet timing, so **the WhatsApp runs' timing r
 the original phone networks** (the ISPs, places and phones of the ITC captures:
 Blend-60 in 2021-11 and 2021-12, Audio-5 in 2023-03) under the lab's netem profile, not
 a live WhatsApp session. The replay is not stateful (no endpoint answers it) and cannot
-adapt packet sizes to the tunnel: in one run (`p1-whatsapp-da7d0955-r1`: sha384, IPv6
-outer, NAT-T, the largest overhead) gw_b IPv6-fragmented 534 large ESP packets, which
-the ESP count and the labels miss (fragments count as `other`).
+adapt packet sizes to the tunnel. In `p1-whatsapp-da7d0955-r1` (sha384, IPv6 outer,
+NAT-T, the largest overhead) gw_b IPv6-fragmented 534 large ESP packets, which the ESP
+count and the labels miss (fragments count as `other`). In `p1-whatsapp-1397c6e5-r1`
+(IPv4 outer, sha384) the chunk's 806 downloaded 1500-byte packets carry no DF bit, so
+gw_b split each ESP packet into two IPv4 fragments. They crossed the tunnel (host_a
+received every packet of the chunk), but no fragment is a whole ESP packet, so they stay
+unlabelled and the run's labelled share is 17%. In the other runs, packets over 1400
+bytes fit the tunnel and are labelled.
 
 **Gaps.** *YouTube:* every realism attempt from the codespaces'
 datacenter addresses got YouTube's bot check; after the normal retries each realism run
 keeps its web traffic and records the block (`observed.blocked`), so the realism runs
-hold no YouTube video. *Chat windows:* 929 of the 930 minimum; each chat run is its own
-tunnel, so its capture starts with the IKE setup and the chat begins a second or two in.
+hold no YouTube video. *Chat windows:* live chat gave 929 (target 920 since 2026-09-28,
+was 930); each chat run is its own tunnel, so its capture starts with the IKE setup and
+the chat begins a second or two in.
 
 **Known limitations.** As in P0: virtual network (veth, netem) inside one host,
 self-hosted services, a fixed mirror of 38 pages. Anchors are 60 s runs (P0 traffic: 90 s).
@@ -151,6 +157,25 @@ Realism runs resolve names with the capturing machine's resolver (the Azure one)
 the tunnel and gw_b's NAT. In mixtures, web and video both use HTTPS to the same lab
 server, so per-packet app labels there would be ambiguous (the run-level labels are exact).
 <!-- p1:end -->
+
+<!-- labels:start -->
+## Per-packet labels (2026-09-28)
+
+Every ok run of P0, P1 and the WhatsApp replay has per-packet labels in
+`labels/<tier>/<run_id>/labels.parquet`, backed up in the draft releases `p0-labels`,
+`p1-labels` and `p1-whatsapp-labels`. Tables, validation and flagged runs:
+`dataset/labels.md`.
+
+| | |
+|---|---|
+| method | each ESP packet is labelled from its own decrypted header. The captured start of its payload is decrypted with the run's SA keys (outer captures are cut at 128 bytes) and paired with the inner packet by header content. Fallbacks are flagged in `label_source`: `prefix` for IPv6 in IPv6 with CBC, whose 32 captured plaintext bytes end before the ports; `length` when there is no key |
+| keys | **the SA keys only build labels; they are never model inputs.** No key, plaintext or decrypted field is a feature |
+| labelled share | median 100% in P0, P1 and WhatsApp; 5th percentile 98.53% (P0), 99.90% (P1) |
+| label sources | P0: 76.4% decrypt, 14.5% prefix, 8.6% length, 0.6% unlabelled. P1: 82.3%, 17.6%, 0.0%, 0.05%. WhatsApp: 97.8% decrypt, 2.2% unlabelled |
+| spot-check | tshark decrypted 300 labelled packets in each of 12 runs (5 per tier and 2 WhatsApp; both modes, both outer families, GCM and CBC): 0 app errors |
+| not labelled | fragmented ESP (IPv4 fragments of an ESP packet, IPv6 fragment headers): e25 by design, 3 realism runs, `p1-whatsapp-1397c6e5-r1` |
+| limitations | in handshake runs, packets of rekeyed-away SAs have no key (8.5% of P0's ESP packets, `length` labels). Offload segments are labelled but unpaired (no `inner_ts`). HTTPS apps that share the lab server in one run stay `ambiguous:<apps>` |
+<!-- labels:end -->
 
 <!-- advval:start -->
 ## Parallel labs: adversarial validation

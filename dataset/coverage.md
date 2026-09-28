@@ -107,7 +107,7 @@ ok runs: 208 (lab 184, internet 8, replayed 16)
 | p1 | mixture email_bulk | >= 8 ok, in test | 8 ok, 2 test | yes |
 | p1 | mixture voip_video_web | >= 8 ok, in test | 8 ok, 2 test | yes |
 | p1 | app chat: ok runs | >= 32 | 40 | yes |
-| p1 | app chat: 2 s windows | >= 930 | 1229 | yes |
+| p1 | app chat: 2 s windows | >= 920 | 1229 | yes |
 | p1 | app chat: set-A configs covered | >= 90% of 32 | 32/32 | yes |
 | p1 | app chat: test runs | >= 8 | 10 | yes |
 | p1 | whatsapp replay: ok runs | 16 (8 chat, 8 voip) | 16 (8 chat, 8 voip) | yes |

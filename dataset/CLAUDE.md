@@ -615,7 +615,7 @@ carry ESP are recorded separately (`observed.windows_2s.esp_active`).
 | each set-A config | ≥ 5 ok runs |
 | each mixture combo (P1) | ≥ 8 ok runs, ≥ 1 in test |
 | each anchor app (P1) | ≥ 8 ok runs (all 8 `a8` configs), ≥ 230 two-second windows, ≥ 2 test runs |
-| live chat (P1, 60 s runs) | ≥ 32 ok runs, ≥ 930 two-second windows, ≥ 90% of set-A configs, ≥ 8 test runs |
+| live chat (P1, 60 s runs) | ≥ 32 ok runs, ≥ 920 two-second windows, ≥ 90% of set-A configs, ≥ 8 test runs |
 | realism (P1) | ≥ 8 ok runs (a YouTube block is retried, then recorded as a gap) |
 | timing (P1) | every ok P1 traffic run `timing_valid` |
 | each set-B combo | ≥ 3 ok runs, each with ≥ 1 observed CHILD rekey |
@@ -626,7 +626,10 @@ carry ESP are recorded separately (`observed.windows_2s.esp_active`).
 | each set-A config (P0) | ≥ 3 ok tunnels (its traffic tunnel + 2 short tunnels) |
 
 The P1 window minimums keep P0's share (1,400 of the 32 × 45 windows a set of 90 s runs
-can give) for 60 s runs: 230 of 8 × 30, 930 of 32 × 30.
+can give) for 60 s runs: 230 of 8 × 30, and 930 of 32 × 30 for chat, lowered to 920 (owner
+decision, 2026-09-28): the 32 live chat runs gave 929, because each run brings up its own
+tunnel and that IKE setup takes the start of its 60 s capture, by design. The chat class
+(live chat and the WhatsApp chat replays) has 1,229.
 
 `coverage.py`:
 - prints a table of target vs actual
@@ -649,17 +652,45 @@ then marked `failed` with the reason. Checks:
 - expected notifies present for edge cases
 - checksums recorded
 
-**Per-packet labels (`tools/labels.py`, after P0).**
-- Match inner plaintext packets to outer ESP packets per direction and SPI, by order and
-  time tolerance.
-- Each ESP packet gets the app and flow of its inner packet.
-- Report the match rate per run. The target is ≥ 98% on `lan` runs.
-- Runs below 90% are flagged, not silently used.
-- Output: `dataset/raw/<run_id>/labels.parquet`.
+**Per-packet labels (`tools/labels.py`; method A, owner decision 2026-09-28).**
+- Each ESP packet is labelled from its own decrypted header. The captured start of its
+  payload (outer captures are cut at 128 bytes) is decrypted with the run's SA keys from
+  `xfrm_*.txt`, and the inner header it starts with names the flow and app. Tunnel mode:
+  the inner IP header and ports. Transport mode: the ports, the outer addresses, and the
+  protocol from the ESP trailer when captured, else from the paired inner packet or the
+  inner capture's flows.
+- **The keys only build labels. They are never model inputs:** no key, plaintext or
+  decrypted field is a feature.
+- Each ESP packet is paired with the inner packet whose header bytes equal its decrypted
+  ones (TTL / hop limit and the IPv4 checksum masked: the gateway rewrites them), first
+  in a time window per direction. A segment of a segmentation-offload super-packet (the
+  inner capture on the sending host sees the super-packet) is labelled but not paired.
+- Fallbacks, flagged per packet in `label_source`:
+  - `prefix`: the captured plaintext ends before the inner ports (IPv6 in IPv6 with a CBC
+    cipher keeps 32 bytes). The flow is that of the inner packet paired by those bytes,
+    or of the one inner flow with the same flow label and addresses.
+  - `length`: nothing decrypts. The P0 method applies: exact expected length, order,
+    time window.
+- Fragmented ESP is not labelled: no fragment is a whole ESP packet. This covers IPv4
+  fragments of an ESP packet and IPv6 fragment headers (e25 by design; replayed
+  1500-byte packets).
+- Report per run the labelled share (target ≥ 98% on `lan` runs; runs below 90% are
+  flagged, not silently used), the shares by source and the paired share. Report per
+  config how often the inner ports were in the captured plaintext.
+- Output: `labels/<tier>/<run_id>/labels.parquet`, never inside run folders or
+  archives, backed up as draft releases `<tier>-labels`. Columns: `ts`, `kind`, `dir`,
+  `len`, `spi`, `seq`, `matched` (labelled), `label_source`, `ports_recovered`, `paired`,
+  `inner_ts`, `inner_len`, `proto`, `flow`, `app`.
 
-**Decryption spot-check.** For 5 random runs per tier, decrypt `outer` with keys from
-`xfrm_*.txt` in tshark and confirm the plaintext agrees with `inner`. This proves the
-ground truth is trustworthy.
+**Decryption spot-check (`tools/decrypt_check.py`).** Samples: 5 seeded runs per tier
+covering both modes and both outer families, then GCM and CBC, plus 2 WhatsApp runs.
+Per run, tshark decrypts an even sample of 300 labelled ESP packets with the keys from
+`xfrm_*.txt`. tshark refuses truncated ESP, so it reads the sampled frames zero-padded
+to their wire length, and only the captured plaintext is used. Checks per packet:
+- the app named by tshark's plaintext equals the label's app (an app error otherwise;
+  unverifiable when the plaintext ends before the ports);
+- a paired inner packet equals the plaintext;
+- tshark agrees with `labels.py`'s own decryption.
 
 ---
 
@@ -888,8 +919,8 @@ source, so opus calls ended at once (384ad8c); DNS lookups hung in the isolated 
 (immediate failure since the veth refactor); Chrome needs ipv6 literals without
 brackets in its resolver rules.
 
-**Open items.** Labels and the decryption spot-check for P0 (phase 5, tools ready:
-`tools/labels.py`, `tools/decrypt_check.py`). Serial recapture of the P0 traffic runs.
+**Open items.** Labels and the decryption spot-check: done in phase 5 (2026-09-28, record
+below). Serial recapture of the P0 traffic runs.
 P1 with `--labs 1` (about 6h48m, 27 core-hours), then P2 if quota remains. Shard-2 ran
 Docker 29.8.1, the maintainer codespace 29.8.0 (same kernel and images).
 
@@ -941,9 +972,76 @@ the chunk manifest and exclusion list, each with its `.sha256`, verified after d
 The runs record code `fcc19e1` (HEAD when they ran); the code that ran was the working
 tree committed right after as `f169b05` (unchanged since the batch started). In one run
 (sha384, IPv6 outer, NAT-T) gw_b IPv6-fragmented 534 large ESP packets: a replay cannot
-adapt packet sizes to the tunnel, and fragmented ESP is counted as `other`.
+adapt packet sizes to the tunnel, and fragmented ESP is counted as `other`. In
+`p1-whatsapp-1397c6e5-r1` (IPv4 outer) 806 of the chunk's 1500-byte packets carry no DF
+bit, so gw_b split each ESP packet into two IPv4 fragments. The run is valid: host_a
+received all 1,145 packets of the chunk. The fragments stay unlabelled (phase 5).
 
-**Open items.** Chat windows: live chat 929 of 930 (the chat class meets it with the
-WhatsApp chat replays). YouTube from a non-datacenter address. P0 and P1 labels and the
-decryption spot-check (phase 5). The serial recapture of the P0 traffic runs.
+**Open items.** YouTube from a non-datacenter address. The serial recapture of the P0
+traffic runs. Resolved on 2026-09-28:
+- chat window target 920 (section 7): live chat has 929 and the chat class 1,229;
+- labels and the decryption spot-check (phase 5, record below).
+
+### Phase 5: labels (2026-09-28)
+
+**Result.**
+- Every ok run of P0 (370), P1 (192) and the WhatsApp replay (16) has per-packet labels
+  in `labels/<tier>/`, made with method A (section 8) by `tools/labels.py` at `a534182`.
+- Backed up in the draft releases `p0-labels`, `p1-labels` and `p1-whatsapp-labels`,
+  each archive with its `.sha256`, verified after download.
+- Median labelled share: 100% in every tier. 5th percentile: 98.53% (P0), 99.90% (P1).
+- Decryption spot-check with tshark: 12 runs, 0 app errors.
+- Tables, validation and flagged runs: `dataset/labels.md`.
+
+**How.**
+- On the maintainer codespace (account `sathwik34`) with 4 workers.
+- `p0-data` was downloaded and verified with `sha256sum -c` before extracting. The
+  release was only read.
+- The local P1 and WhatsApp runs matched `p1-data` and `p1-whatsapp` file by file, so
+  they were used.
+- Labelling took 7 minutes for P0 and 9 for P1.
+
+**Decisions.**
+- **First pass with the P0 method.** The labels.py from before 0478d94 (at 4cba50e) and
+  the current one gave identical tables on 2 P0 runs, one tunnel and one transport. The
+  failures were systematic:
+  - Tunnel-mode up direction of TCP senders: host_a's inner capture holds
+    segmentation-offload super-packets.
+  - Drift between flows of one padded length: some packets had another flow's app.
+  - The owner stopped the release and chose method A: each ESP packet is labelled from
+    its own decrypted header and paired by content, with length matching only as a
+    flagged fallback. The keys are never model inputs.
+- **Validation of method A.**
+  - (a) Where the old method matched at least 99.9%, old and new agree on the app for at
+    least 99.9% of packets in 105 of 106 P0 runs, 62 of 64 P1 runs and 7 of 7 WhatsApp
+    runs.
+  - Where they differ, tshark confirms the new labels. `p0-video-0533b8ff-r1`: old 93
+    of 300 sampled packets wrong, new 0.
+  - (b) The spot-check passes.
+  - (c) New tables in `dataset/labels.md`.
+- **Flagged runs, all explained.**
+  - `p0-handshake-fe59fc1f-r2`: rekeyed SAs whose keys the end-of-run xfrm dump no longer
+    holds.
+  - 3 realism runs and `p1-whatsapp-1397c6e5-r1`: IPv4-fragmented ESP. Its down
+    direction was replayed through the tunnel, so the run is valid and needs no
+    recapture.
+  - By design: e25 (fragmentation) and e19 (AH).
+- **Chat window target:** 920 (section 7).
+- **Part 3 not started:** the serial P0 recapture, and no offload or other lab change
+  (owner decision).
+
+**Incidents during phase 5, and what was done:**
+
+| incident | effect | fix | runs |
+|---|---|---|---|
+| tshark refuses to decrypt truncated ESP ("ESP truncated"; outer captures are cut at 128 bytes) | the spot-check could not run as specified | tshark reads the sampled frames zero-padded to their wire length, and only the captured plaintext is compared (a534182) | - |
+| the P0 method paired offload segments and same-length flows wrongly | wrong or missing labels | method A (a534182) | all |
+| the maintainer session stalled after the budget check (02:10 UTC); the keep-alive ended at its 06:18 cap and the codespace stopped for idleness | about 18 core-hours without work | the owner restarted the codespace at 07:51; the phase 5 pipeline ran detached | - |
+
+**Open items.**
+- Packets of SAs rekeyed away before the end-of-run xfrm dump have no key and get
+  `length` labels: 8.5% of P0's ESP packets, 1,005,578 of 1,005,880 in handshake runs. A capture change
+  could dump the xfrm state after each rekey.
+- Fragmented ESP stays unlabelled.
+- Serial recapture of the P0 traffic runs.
 

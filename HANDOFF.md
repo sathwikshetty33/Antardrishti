@@ -29,7 +29,7 @@ validation that passes.
 
 - Mixtures: 10 combos on 8 configs (`a8`, one per wire shape x mode), 90 s: 8 runs per combo.
 - Anchor set: the 6 single apps on the same 8 configs, 60 s, validated like P0 traffic.
-- Live chat 60 s (targets lowered to match: 32 runs, 930 windows); realism 8 runs.
+- Live chat 60 s (targets lowered to match: 32 runs, 930 windows, then 920: each run's own IKE setup); realism 8 runs.
 - Every P1 traffic run is captured alone on its machine and records `timing_valid: true`;
   P1 edge cases record `timing_valid: false`. The 192 P0 traffic runs are annotated
   `timing_valid: false` in the manifest (append-only).
@@ -64,14 +64,17 @@ delete them.
   (merge per tier: the P0 lines keep their older design).
 - Do not edit `capture/matrix.yaml`, `capture/edge.yaml` or `capture/netem.yaml` beyond
   the approved plan changes.
-- WhatsApp replay is skipped unless pcaps are in `dataset/external/whatsapp/` (never
-  synthesized). Realism (internet) runs may find YouTube blocked: record it, move on.
+- WhatsApp replay uses the chunks in `dataset/external/whatsapp/`, made by
+  `tools/whatsapp_prep.py` from the public ITC captures (never synthesized). Realism
+  (internet) runs may find YouTube blocked: record it, move on.
 
 ## Open items
 
-1. P0 phase 5 (labels + decryption spot-check): tools ready (`tools/labels.py`,
-   `tools/decrypt_check.py`), to be run on the owner's account because it writes into
-   P0 run folders.
+1. Phase 5 (labels + decryption spot-check): **done** 2026-09-28 for P0, P1 and the
+   WhatsApp replay (method A: labels from each ESP packet's decrypted header). Labels
+   are written to `labels/<tier>/`, never into run folders; the P0 runs were only read
+   from the verified `p0-data` release. Draft releases `p0-labels`, `p1-labels` and
+   `p1-whatsapp-labels`; tables and flagged runs in `dataset/labels.md`, record in §12.
 2. Serial recapture of the 192 P0 traffic runs (owner's account, about 24 core-hours).
 3. P1: **done** on 2026-09-27 (account `sathwik34`, 2 slices, `--labs 1`): 192/192 runs ok,
    draft releases `p1-slice1`, `p1-slice2`, `p1-data` (verified). Record in `dataset/CLAUDE.md`
@@ -100,6 +103,13 @@ delete them.
   with the `user` scope; the P1 token has `read:packages` only, so ask the owner to read
   the page). Storage is reported in GB-months and lags by hours.
 - **Draft releases** are visible only to accounts with write access to the repository.
+- **Labels.** Pairing inner and outer packets by length fails:
+  - host_a's inner capture holds segmentation-offload super-packets;
+  - same-length flows get swapped.
+
+  Use `tools/labels.py` (it labels from the decrypted headers). tshark refuses truncated
+  ESP, so `tools/decrypt_check.py` pads the sampled frames. xfrm dumps keep only the last
+  keys, so packets of rekeyed-away SAs fall back to length labels.
 - `gh` (needed for release download and upload) is in the devcontainer since this
   handoff; a codespace created earlier gets it with `bash lab/bootstrap.sh`, or
   `sudo apt-get install -y gh`.
