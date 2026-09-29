@@ -44,7 +44,7 @@ if not bundle_dir.is_absolute():
 upload_limit_mb = float(env("UPLOAD_LIMIT_MB", "100"))
 # the largest capture (uncompressed pcap bytes) an analysis accepts: measured to finish well
 # under the 300 s function limit on one vcpu within 2 gb (app/CLAUDE.md section 9)
-max_pcap_mb = float(env("MAX_PCAP_MB", "220"))
+max_pcap_mb = float(env("MAX_PCAP_MB", "300"))
 access_key = env("APP_ACCESS_KEY")
 tmp_dir = Path(env("TMP_DIR", "/tmp"))
 on_vercel = bool(env("VERCEL"))

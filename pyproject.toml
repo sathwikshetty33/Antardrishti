@@ -1,0 +1,20 @@
+# the antardrishti platform's python function on vercel (app/CLAUDE.md section 2).
+# runtime dependencies only: the inference path is pure python + wheels (no lightgbm,
+# scikit-learn, pandas, pyarrow, tshark or zstd binary). development and training
+# dependencies live in analyzer/requirements.txt and app/requirements-dev.txt.
+[project]
+name = "antardrishti"
+version = "1.0.0"
+description = "Passive IPsec VPN analysis: config inference, traffic classification, security assessment"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy==2.5.3",
+    "zstandard==0.25.0",
+    "fastapi==0.141.1",
+    "pydantic==2.13.5",
+    "sqlalchemy==2.1.1",
+    "psycopg[binary]==3.3.6",
+]
+
+[tool.vercel]
+entrypoint = "app.api.index:app"

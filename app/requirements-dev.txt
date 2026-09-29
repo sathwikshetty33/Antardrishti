@@ -1,0 +1,7 @@
+# local development and tests of the platform (on top of pyproject.toml's runtime deps)
+alembic==1.20.0
+uvicorn==0.54.0
+httpx==0.28.1
+jsonschema==4.26.0
+pytest==9.1.1
+playwright==1.63.0

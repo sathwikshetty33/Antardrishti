@@ -5,9 +5,38 @@ for SIH 2026. It infers the IPsec configuration of captured or live traffic, pre
 the traffic type inside ESP and produces a security assessment, without ever
 decrypting anything.
 
-This repository is phase 1: the lab that builds the labelled training and testing
-dataset. The full specification is [dataset/CLAUDE.md](dataset/CLAUDE.md); the
-datasheet is [dataset/README.md](dataset/README.md).
+The repository holds all three phases:
+1. **Dataset** (`lab/`, `gen/`, `capture/`, `tools/`, `dataset/`): the lab that built the labelled
+   IPsec dataset. Spec: [dataset/CLAUDE.md](dataset/CLAUDE.md); datasheet:
+   [dataset/README.md](dataset/README.md).
+2. **Analyzer** (`analyzer/`): parser, features and 17 LightGBM models (bundle `models-v1`).
+   Spec: [analyzer/CLAUDE.md](analyzer/CLAUDE.md); results: [analyzer/REPORT.md](analyzer/REPORT.md).
+3. **Platform** (`app/`): rule engine, FastAPI backend with PostgreSQL, React dashboard,
+   deployable on Vercel's free tier. Spec: [app/CLAUDE.md](app/CLAUDE.md).
+
+## Run the platform
+
+- **On Vercel (Hobby):** one project with a Python function (FastAPI), the dashboard on the CDN,
+  Neon Postgres and Vercel Blob from the Marketplace. The manual steps are in
+  [DEPLOY.md](DEPLOY.md).
+- **Locally, self-hosted:** Postgres in Docker (`docker compose up -d`), the API under uvicorn
+  and the Vite dev server, with captures stored in a local folder. See [DEMO.md](DEMO.md).
+
+There are no workers, queues or Redis in either setup. An analysis runs inside the request
+that starts it; the dashboard polls its status from Postgres, and a demo replay feeds a stored
+capture to the API in 5-second chunks.
+
+## Tech stack
+
+| layer | technology |
+|---|---|
+| analysis | Python 3.12, numpy: a pure-Python inference path (a numpy evaluator of the LightGBM models, zstandard); no tshark or other binaries at runtime |
+| models | LightGBM 4.7, trained offline (`analyzer/`), shipped as the checksummed bundle `app/api/models/v1` |
+| rules | table-driven checks against RFC 8221, RFC 8247, NIST SP 800-77r1, RFC 7296 and RFC 4303 (`app/api/rules`) |
+| api | FastAPI, pydantic (result contract `app/schema`, JSON Schema), SQLAlchemy 2 with NullPool, Alembic, psycopg 3 |
+| data | PostgreSQL: Neon on Vercel, Docker locally. Captures in Vercel Blob (browser client uploads) or a local folder |
+| dashboard | React 19, TypeScript, Vite, Tailwind CSS 4, shadcn/ui components on Radix, Apache ECharts, Framer Motion, lucide; reports printed to PDF in the browser |
+| hosting | Vercel Hobby: FastAPI preset, static output in `public/`, 300 s functions |
 
 ## Layout
 
@@ -16,6 +45,9 @@ datasheet is [dataset/README.md](dataset/README.md).
 - `capture/`: the experiment design and the orchestrator (`run.py`)
 - `tools/`: coverage, checks, merge, export, adversarial validation
 - `dataset/`: manifest, coverage report, datasheet (raw captures are never committed)
+- `analyzer/`: parser, features, models, evaluation, CLI (`python -m analyzer.cli analyze <pcap>`)
+- `app/`: `schema/` (contract), `api/` (FastAPI, rules, demos, model bundle), `web/` (dashboard),
+  `tests/`, `docs/screenshots/`
 
 ## Quick start (maintainer)
 

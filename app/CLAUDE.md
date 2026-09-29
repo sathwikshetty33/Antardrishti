@@ -244,3 +244,10 @@ compose Postgres, uvicorn, Vite).
   `src/index.css`, dark first with a light toggle, fonts self-hosted. `tsc -b` and oxlint
   clean; build 0.8 s into `public/`. Screenshots in `app/docs/screenshots`
   (`python app/docs/screenshots.py`), no console errors.
+- **Step 6 done (2026-09-29).** `pyproject.toml` (runtime dependencies, `tool.vercel.entrypoint =
+  "app.api.index:app"`), `vercel.json` (build: verify the bundle, build the dashboard into
+  `public/`; function `app/api/index.py` with `maxDuration` 300 and `excludeFiles`; SPA rewrite;
+  headers), `.vercelignore`, `.env.example`, `DEPLOY.md` (the owner's manual steps), `DEMO.md`
+  (local run), README "Run the platform" and "Tech stack". Function bundle about 143 MB
+  (127 MB of dependencies). Largest capture: `MAX_PCAP_MB` = 300 (13.4 s, 686 MB under a 2 GB
+  address-space cap; about 40 s at an assumed 3x slower vCPU).
