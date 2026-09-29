@@ -225,6 +225,23 @@ def test_limits_and_expiry(mixture_parts, monkeypatch):
     assert still_live.status_code == 200
 
 
+def test_completes_on_size_or_duration_cap(mixture_parts, monkeypatch):
+    header, esp, ike = mixture_parts
+    monkeypatch.setattr(settings, "live_max_esp_mb", 0.0001)  # a single chunk already exceeds this
+    a = create_session()
+    r = post_chunk(a["id"], a["key"], 0, header, esp[0], ike[0])
+    assert r.status_code == 200
+    assert r.json()["status"] == "completed" and "MB cap" in r.json()["note"]
+    again = post_chunk(a["id"], a["key"], 1, header, esp[1], ike[1])
+    assert again.status_code == 410
+    monkeypatch.setattr(settings, "live_max_esp_mb", 100.0)
+
+    monkeypatch.setattr(settings, "live_max_duration_s", 0.0)  # already "over" at the first chunk
+    b = create_session()
+    r = post_chunk(b["id"], b["key"], 0, header, esp[0], ike[0])
+    assert r.json()["status"] == "completed" and "minute cap" in r.json()["note"]
+
+
 def test_overview_scoped_to_one_session(mixture_parts):
     header, esp, ike = mixture_parts
     a = create_session()

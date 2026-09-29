@@ -152,7 +152,8 @@ class live_session(base):
     analysis_id: Mapped[str] = mapped_column(ForeignKey("analyses.id", ondelete="CASCADE"), primary_key=True)
     name: Mapped[str] = mapped_column(String(200), default="")
     key_hash: Mapped[str] = mapped_column(String(64))                    # sha256 of the sensor key; never the key
-    status: Mapped[str] = mapped_column(String(16), default="waiting")   # waiting live stopped expired
+    status: Mapped[str] = mapped_column(String(16), default="waiting")   # waiting live stopped expired completed
+    note: Mapped[str] = mapped_column(String(200), default="")           # why it completed or stopped
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     last_chunk_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     chunks: Mapped[int] = mapped_column(Integer, default=0)

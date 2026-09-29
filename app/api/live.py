@@ -49,16 +49,29 @@ def count_records(header, records):
 
 
 def effective_status(sess, t=None):
-    """the session's status as of t (default now), without writing anything"""
+    """the session's status as of t (default now), without writing anything. total duration
+    and capture size are not judged lazily here: check_caps settles those right after each
+    chunk, since only a chunk arriving can grow either of them."""
     t = t if t is not None else time.time()
-    if sess.status == "stopped":
-        return "stopped"
-    if t - sess.created_at.timestamp() > settings.live_max_duration_s:
-        return "expired"
+    if sess.status in ("stopped", "completed"):
+        return sess.status
     last = (sess.last_chunk_at or sess.created_at).timestamp()
     if sess.status == "live" and t - last > settings.live_idle_timeout_s:
         return "expired"
     return sess.status
+
+
+def check_caps(sess, esp_bytes):
+    """-> a completion note once a chunk has pushed the session past its total-duration or
+    accumulated-capture-size cap, else None. reprocessing the whole capture on every chunk
+    (module docstring) makes each chunk slower as the session grows, so both caps bound that
+    growth instead of letting a session run and reprocess without limit."""
+    age = (m.now() - sess.created_at).total_seconds()
+    if age >= settings.live_max_duration_s:
+        return f"reached the {settings.live_max_duration_s / 60:.0f}-minute cap on a live session"
+    if esp_bytes >= settings.live_max_esp_mb * 2 ** 20:
+        return f"reached the {settings.live_max_esp_mb:.0f} MB cap on a live session's capture"
+    return None
 
 
 def refresh_status(s, sess):

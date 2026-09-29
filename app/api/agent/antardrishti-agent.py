@@ -176,6 +176,9 @@ def run(args):
                         os.remove(p)
                     except OSError:
                         pass
+                if result and result.get("status") == "completed":
+                    print(f"session completed: {result.get('note') or 'reached a live-session cap'}")
+                    break
                 seq += 1
         finally:
             stop_session(args.api, args.session, args.key)

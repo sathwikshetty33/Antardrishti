@@ -372,8 +372,8 @@ def get_live(s, sid):
 def live_summary(s, sess):
     a = s.get(m.analysis, sess.analysis_id)
     return {"id": sess.analysis_id, "name": sess.name, "status": live.refresh_status(s, sess),
-            "chunks": sess.chunks, "bytes": sess.total_bytes, "last_seq": sess.last_seq,
-            "created_at": sess.created_at.isoformat(),
+            "note": sess.note or None, "chunks": sess.chunks, "bytes": sess.total_bytes,
+            "last_seq": sess.last_seq, "created_at": sess.created_at.isoformat(),
             "last_chunk_at": sess.last_chunk_at.isoformat() if sess.last_chunk_at else None,
             "risk": a.risk if a else None, "risk_band": a.risk_band if a else None,
             "tunnel_count": len((a.result or {}).get("tunnels", [])) if a else 0}
@@ -426,8 +426,8 @@ async def live_chunks(sid: str, seq: int = Form(...), esp: UploadFile = File(...
     if not live.check_key(sess, x_sensor_key):
         raise HTTPException(403, "missing or wrong sensor key (x-sensor-key)")
     eff = live.refresh_status(s, sess)
-    if eff in ("stopped", "expired"):
-        raise HTTPException(410, f"this session is {eff}")
+    if eff in ("stopped", "expired", "completed"):
+        raise HTTPException(410, f"this session is {eff}" + (f" ({sess.note})" if sess.note else ""))
     if seq != sess.last_seq + 1:
         raise HTTPException(409, f"out of order: expected seq {sess.last_seq + 1}")
     if sess.last_chunk_at and (m.now() - sess.last_chunk_at).total_seconds() < settings.live_min_chunk_interval_s:
@@ -444,12 +444,17 @@ async def live_chunks(sid: str, seq: int = Form(...), esp: UploadFile = File(...
     a = s.get(m.analysis, sid)
     esp_path, ike_path = live.rebuild(s, sess)
     try:
+        esp_size = esp_path.stat().st_size
         inputs = [(esp_path, "live-esp.pcap")] + ([(ike_path, "live-ike.pcap")] if ike_path else [])
         pipeline.run(s, a, inputs)
     finally:
         esp_path.unlink(missing_ok=True)
         if ike_path:
             ike_path.unlink(missing_ok=True)
+    note = live.check_caps(sess, esp_size)
+    if note:
+        sess.status, sess.note = "completed", note
+        s.commit()
     return {**live_summary(s, sess), "packets_in_chunk": n, "analysis": summary(a)}
 
 
@@ -458,8 +463,9 @@ def live_stop(sid: str, x_sensor_key: str | None = Header(None), s: Session = De
     sess = get_live(s, sid)
     if not live.check_key(sess, x_sensor_key):
         raise HTTPException(403, "missing or wrong sensor key (x-sensor-key)")
-    sess.status = "stopped"
-    s.commit()
+    if sess.status in ("waiting", "live"):
+        sess.status = "stopped"
+        s.commit()
     return live_summary(s, sess)
 
 
