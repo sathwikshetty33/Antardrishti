@@ -7,6 +7,7 @@
 """
 import hashlib
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -90,8 +91,20 @@ def build():
     print(f"models/v1: {len(files)} files, commit {commit[:7]}")
 
 
+def default_dir():
+    """MODEL_BUNDLE when set, else a locally built models/v1, else the copy vendored into the platform"""
+    env = os.environ.get("MODEL_BUNDLE")
+    if env:
+        p = Path(env)
+        return p if p.is_absolute() else cm.root / p
+    for d in (cm.models, cm.root / "app" / "api" / "models" / "v1"):
+        if (d / "SHA256SUMS").exists():
+            return d
+    return cm.models
+
+
 def load(path=None):
-    d = Path(path or cm.models)
+    d = Path(path or default_dir())
     for line in (d / "SHA256SUMS").read_text().splitlines():
         h, name = line.split(None, 1)
         if sha(d / name.strip()) != h:
