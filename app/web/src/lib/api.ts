@@ -27,7 +27,7 @@ export type Tunnel = {
 export type Analysis = {
   id: string; created_at: string | null; finished_at: string | null
   status: 'pending' | 'queued' | 'running' | 'replaying' | 'done' | 'failed'; progress: number; stage: string
-  error: string | null; source: 'upload' | 'demo' | 'replay'; name: string; size_bytes: number
+  error: string | null; source: 'upload' | 'demo' | 'replay' | 'live'; name: string; size_bytes: number
   bundle_version: string; schema_version: string; timings: Record<string, number>; risk: number | null
   risk_band: string | null; replay: { demo: string; step: number; steps: number; t: number; packets: number } | null
   tunnel_count: number; packets: number | null
@@ -58,6 +58,14 @@ export type Overview = {
 export type Report = {
   analysis: Analysis; overall: Risk | null; tunnels: Tunnel[]; findings: Finding[]; threats: Threat[]; model: Model
   counts: Record<string, unknown>; inputs: string[]
+}
+export type LiveStatus = 'waiting' | 'live' | 'stopped' | 'expired' | 'completed'
+export type LiveSession = {
+  id: string; name: string; status: LiveStatus; note: string | null; chunks: number; bytes: number; last_seq: number
+  created_at: string; last_chunk_at: string | null; risk: number | null; risk_band: string | null; tunnel_count: number
+}
+export type LiveChunk = LiveSession & {
+  packets_in_chunk: number; analysis: Analysis; demo?: { name: string; step: number; steps: number }
 }
 
 export class ApiError extends Error {
@@ -111,7 +119,7 @@ export const api = {
   health: () => call<{ ok: boolean; db: string; bundle: string; storage: string }>('/api/health'),
   model: () => call<Model>('/api/model'),
   config: () => call<Config>('/api/config'),
-  overview: () => call<Overview>('/api/overview'),
+  overview: (session?: string | null) => call<Overview>(`/api/overview${session ? `?session=${encodeURIComponent(session)}` : ''}`),
   analyses: () => call<Analysis[]>('/api/analyses'),
   analysis: (id: string) => call<Analysis>(`/api/analyses/${id}`),
   tunnels: (id: string) => call<Tunnel[]>(`/api/analyses/${id}/tunnels`),
@@ -124,6 +132,17 @@ export const api = {
     post<Analysis>('/api/analyses', body),
   replayStart: (demo: string) => post<Analysis>('/api/replays', { demo }),
   replayNext: (id: string) => post<Analysis>(`/api/replays/${id}/next`, {}),
+  // live sessions: every session is readable by anyone; feeding or stopping one needs its sensor key
+  liveSessions: () => call<LiveSession[]>('/api/live'),
+  liveSession: (id: string) => call<LiveSession>(`/api/live/${id}`),
+  liveCreate: (name: string | null) => post<LiveSession & { key: string }>('/api/live', { name }),
+  liveAlerts: (id: string) => call<Finding[]>(`/api/live/${id}/alerts`),
+  liveStop: (id: string, key: string) =>
+    call<LiveSession>(`/api/live/${id}/stop`, { method: 'POST', headers: { 'x-sensor-key': key } }),
+  liveDemoNext: (id: string, key: string, demo: string, seq: number) =>
+    call<LiveChunk>(`/api/live/${id}/demo-next`, {
+      method: 'POST', body: JSON.stringify({ demo, seq }), headers: { 'content-type': 'application/json', 'x-sensor-key': key },
+    }),
 }
 
 // upload one capture: straight to vercel blob (client upload), or to the local api in local mode

@@ -45,8 +45,10 @@ function FactRow({ name, f }: { name: string; f: Fact }) {
 
 export function TunnelPage() {
   const { id = '', idx = '0' } = useParams()
-  const q = useQuery({ queryKey: ['tunnel', id, idx], queryFn: () => api.tunnel(id, Number(idx)) })
   const a = useQuery({ queryKey: ['analysis', id], queryFn: () => api.analysis(id) })
+  // a live run's tunnel changes with every chunk
+  const q = useQuery({ queryKey: ['tunnel', id, idx], queryFn: () => api.tunnel(id, Number(idx)),
+    refetchInterval: a.data?.source === 'live' ? 5_000 : false })
   if (q.isLoading) return <div className="grid gap-4 lg:grid-cols-2"><CardSkeleton rows={10} /><CardSkeleton rows={10} /></div>
   if (q.error) return <Card><ErrorState error={q.error} retry={() => q.refetch()} /></Card>
   const t = q.data!

@@ -13,20 +13,27 @@ import { CardSkeleton, EmptyState, ErrorState } from '@/components/states'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Table, Td, Th, Tr } from '@/components/ui/table'
-import { api, type Finding, type Report } from '@/lib/api'
+import { api, type Analysis, type Finding, type Report } from '@/lib/api'
 import { appLabel, shareNames } from '@/lib/colors'
 import { errorBar, factValue, num, round100, seconds, when } from '@/lib/format'
+import { setSelectedRun, useSelectedRun } from '@/lib/run'
 import { currentTheme, setTheme } from '@/lib/theme'
 
 export function ReportsPage() {
-  const q = useQuery({ queryKey: ['analyses'], queryFn: api.analyses })
+  const run = useSelectedRun()
+  const q = useQuery({ queryKey: ['analyses'], queryFn: api.analyses, enabled: !run })
+  const one = useQuery({ queryKey: ['analysis', run], queryFn: () => api.analysis(run!), enabled: !!run })
   const nav = useNavigate()
-  const done = (q.data ?? []).filter((a) => a.status === 'done')
+  // a live run has a report as soon as its first chunk is analysed
+  const ready = (a: Analysis) => a.status === 'done' || (a.source === 'live' && !!a.finished_at)
+  const done = run ? (one.data && ready(one.data) ? [one.data] : []) : (q.data ?? []).filter(ready)
+  const pending = run ? one : q
   return (
     <>
-      <PageHeader title="Reports" description="Executive and technical reports, generated in the browser from the API. Use Print → Save as PDF." />
+      <PageHeader title="Reports" description="Executive and technical reports, generated in the browser from the API. Use Print → Save as PDF."
+        actions={run ? <Button variant="ghost" onClick={() => setSelectedRun(null)}>Show all runs</Button> : null} />
       <Card>
-        {q.isLoading ? <div className="p-5"><CardSkeleton rows={5} /></div> : q.error ? <ErrorState error={q.error} /> : done.length ? (
+        {pending.isLoading ? <div className="p-5"><CardSkeleton rows={5} /></div> : pending.error ? <ErrorState error={pending.error} /> : done.length ? (
           <Table>
             <thead><tr><Th>Analysis</Th><Th>Risk</Th><Th className="text-right">Tunnels</Th><Th className="text-right">Created</Th><Th /></tr></thead>
             <tbody>
@@ -46,7 +53,7 @@ export function ReportsPage() {
               ))}
             </tbody>
           </Table>
-        ) : <EmptyState title="No finished analyses">Reports appear once an analysis is done.</EmptyState>}
+        ) : <EmptyState title={run ? 'The selected run has no report yet' : 'No finished analyses'}>{run ? 'Its report appears once its analysis (or, for a live session, its first chunk) is done.' : 'Reports appear once an analysis is done.'}</EmptyState>}
       </Card>
     </>
   )

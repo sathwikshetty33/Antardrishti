@@ -27,14 +27,14 @@ export function Sheet({ open, onOpenChange, title, description, children }: {
   )
 }
 
-export function Modal({ open, onOpenChange, title, children }: {
-  open: boolean; onOpenChange: (o: boolean) => void; title: React.ReactNode; children: React.ReactNode
+export function Modal({ open, onOpenChange, title, children, wide }: {
+  open: boolean; onOpenChange: (o: boolean) => void; title: React.ReactNode; children: React.ReactNode; wide?: boolean
 }) {
   return (
     <D.Root open={open} onOpenChange={onOpenChange}>
       <D.Portal>
         <D.Overlay className="fixed inset-0 z-40 bg-black/50" />
-        <D.Content className="fixed left-1/2 top-1/2 z-50 w-[min(92vw,440px)] -translate-x-1/2 -translate-y-1/2 rounded-[12px] border border-border bg-surface p-6 shadow-2xl focus:outline-none">
+        <D.Content className={`fixed left-1/2 top-1/2 z-50 max-h-[90vh] overflow-y-auto ${wide ? 'w-[min(94vw,680px)]' : 'w-[min(92vw,440px)]'} -translate-x-1/2 -translate-y-1/2 rounded-[12px] border border-border bg-surface p-6 shadow-2xl focus:outline-none`}>
           <D.Title className="text-base font-semibold">{title}</D.Title>
           <D.Description className="sr-only">dialog</D.Description>
           <div className="mt-4">{children}</div>

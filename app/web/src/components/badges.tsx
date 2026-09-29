@@ -1,4 +1,4 @@
-import { AlertOctagon, AlertTriangle, CheckCircle2, CircleDashed, Eye, FileKey2, HelpCircle, Info, Radio, ShieldAlert, Sparkles } from 'lucide-react'
+import { AlertOctagon, AlertTriangle, CheckCircle2, CircleDashed, Eye, FileKey2, HelpCircle, Hourglass, Info, Radio, ShieldAlert, Sparkles, Square, TimerOff } from 'lucide-react'
 import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { pct } from '@/lib/format'
@@ -86,6 +86,25 @@ export function StatusBadge({ status }: { status: string }) {
     <span className="chip" style={{ '--c': statusStyle[status] ?? 'var(--info)' } as React.CSSProperties}>
       {live ? <Radio className="size-3.5 animate-pulse" aria-hidden /> : null}
       {status}
+    </span>
+  )
+}
+
+const liveStyle: Record<string, { c: string; I: typeof Info; label: string }> = {
+  waiting: { c: 'var(--muted)', I: Hourglass, label: 'waiting' },
+  live: { c: 'var(--accent)', I: Radio, label: 'LIVE' },
+  stopped: { c: 'var(--info)', I: Square, label: 'stopped' },
+  completed: { c: 'var(--pass)', I: CheckCircle2, label: 'completed' },
+  expired: { c: 'var(--medium)', I: TimerOff, label: 'expired' },
+}
+
+// a live session's state; LIVE pulses
+export function LiveBadge({ status }: { status: string }) {
+  const s = liveStyle[status] ?? liveStyle.waiting
+  return (
+    <span className={cn('chip', status === 'live' && 'font-semibold tracking-wide')} style={{ '--c': s.c } as React.CSSProperties}>
+      <s.I className={cn('size-3.5', status === 'live' && 'animate-pulse')} aria-hidden />
+      {s.label}
     </span>
   )
 }

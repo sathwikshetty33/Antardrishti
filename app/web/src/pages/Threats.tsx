@@ -8,11 +8,14 @@ import { CardSkeleton, EmptyState, ErrorState } from '@/components/states'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, Td, Th, Tr } from '@/components/ui/table'
 import { api } from '@/lib/api'
+import { useSelectedRun } from '@/lib/run'
 import { cn } from '@/lib/utils'
 
-// /threats: the latest finished analysis' matrix
+// /threats: the selected run's matrix, else the latest finished analysis'
 export function LatestThreats() {
-  const q = useQuery({ queryKey: ['analyses'], queryFn: api.analyses })
+  const run = useSelectedRun()
+  const q = useQuery({ queryKey: ['analyses'], queryFn: api.analyses, enabled: !run })
+  if (run) return <Navigate to={`/analyses/${run}/threats`} replace />
   if (q.isLoading) return <CardSkeleton rows={8} />
   const a = q.data?.find((x) => x.status === 'done')
   if (!a) return <Card><EmptyState title="No finished analysis yet">Run an analysis to see its threat matrix.</EmptyState></Card>
@@ -21,9 +24,11 @@ export function LatestThreats() {
 
 export function ThreatsPage() {
   const { id = '' } = useParams()
-  const th = useQuery({ queryKey: ['threats', id], queryFn: () => api.threats(id) })
-  const fs = useQuery({ queryKey: ['findings', id], queryFn: () => api.findings(id) })
   const a = useQuery({ queryKey: ['analysis', id], queryFn: () => api.analysis(id) })
+  // a live run's matrix changes with every chunk
+  const every = a.data?.source === 'live' ? 5_000 : false
+  const th = useQuery({ queryKey: ['threats', id], queryFn: () => api.threats(id), refetchInterval: every })
+  const fs = useQuery({ queryKey: ['findings', id], queryFn: () => api.findings(id), refetchInterval: every })
   const [cell, setCell] = useState<string | null>(null)
   const [pick, setPick] = useState<string | null>(null)
   if (th.isLoading || fs.isLoading) return <CardSkeleton rows={10} />

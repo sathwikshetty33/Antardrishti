@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Activity, FileText, Gauge, Grid3x3, KeyRound, ListChecks, Moon, PlayCircle, Sun, UploadCloud } from 'lucide-react'
+import { Activity, FileText, Gauge, Grid3x3, KeyRound, ListChecks, Moon, PlayCircle, RadioTower, Sun, UploadCloud } from 'lucide-react'
 import * as React from 'react'
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
@@ -8,12 +8,15 @@ import { Input } from '@/components/ui/input'
 import { Modal } from '@/components/ui/sheet'
 import { Tip } from '@/components/ui/tooltip'
 import { BrandMark } from '@/components/Brand'
+import { RunSwitcher } from '@/components/RunSwitcher'
+import { Toaster } from '@/components/Toaster'
 import { accessKey, api, setAccessKey } from '@/lib/api'
 import { currentTheme, setTheme, type Theme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 
 const nav = [
   { to: '/', label: 'Overview', icon: Gauge, end: true },
+  { to: '/live', label: 'Live', icon: RadioTower },
   { to: '/upload', label: 'Analyze capture', icon: UploadCloud },
   { to: '/analyses', label: 'Analyses', icon: ListChecks },
   { to: '/threats', label: 'Threat matrix', icon: Grid3x3 },
@@ -116,12 +119,12 @@ function TopBar() {
   const ok = health.data?.ok
   return (
     <header className="no-print sticky top-0 z-30 flex h-14 items-center justify-between gap-4 border-b border-accent/40 bg-black/60 px-4 backdrop-blur-3xl backdrop-saturate-150 md:px-6 transition-all duration-300">
-      <div className="flex items-center gap-3 text-xs text-text-2 md:hidden">
-        <BrandMark />
-        <span className="text-sm font-semibold text-text">Antardrishti</span>
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="md:hidden"><BrandMark /></span>
+        <RunSwitcher />
+        <div className="hidden truncate text-xs text-muted 2xl:block">IPsec VPN analysis · config inference · traffic classification · security assessment</div>
       </div>
-      <div className="hidden text-xs text-muted md:block">IPsec VPN analysis · config inference · traffic classification · security assessment</div>
-      <div className="flex items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-1.5">
         <Tip content={health.data ? `API ${ok ? 'healthy' : 'degraded'} · database ${health.data.db} · storage ${health.data.storage}` : 'Checking API'}>
           <span className="mr-1 flex items-center gap-1.5 text-xs text-text-2">
             <Activity className="size-3.5" style={{ color: ok ? 'var(--pass)' : ok === false ? 'var(--critical)' : 'var(--muted)' }} aria-hidden />
@@ -153,6 +156,7 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+      <Toaster />
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRight, Network, PlayCircle, ShieldAlert, UploadCloud, Waypoints } from 'lucide-react'
+import { ArrowRight, Network, PlayCircle, RadioTower, ShieldAlert, UploadCloud, Waypoints } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/AppShell'
 import { BandBadge, ConfidenceBadge, SeverityBadge, StatusBadge } from '@/components/badges'
@@ -12,9 +12,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, Td, Th, Tr } from '@/components/ui/table'
 import { api } from '@/lib/api'
 import { factValue, num, when } from '@/lib/format'
+import { setSelectedRun, useSelectedRun } from '@/lib/run'
 
 export function Overview() {
-  const q = useQuery({ queryKey: ['overview'], queryFn: api.overview, refetchInterval: 15_000 })
+  const run = useSelectedRun()
+  // one run (the top bar's choice) or every run; a live run refreshes as its chunks arrive
+  const q = useQuery({
+    queryKey: ['overview', run], queryFn: () => api.overview(run),
+    refetchInterval: (query) => (run && query.state.data?.recent.some((x) => x.source === 'live') ? 5_000 : 15_000),
+  })
   const nav = useNavigate()
   if (q.isLoading) {
     return (
@@ -45,10 +51,21 @@ export function Overview() {
     )
   }
   const crit = d.alerts.filter((a) => a.severity === 'critical').length
+  const one = run ? d.recent[0] : null
   return (
     <>
-      <PageHeader title="Overview" description="Tunnels, risk and alerts across the last 20 finished analyses."
-        actions={<Button variant="primary" onClick={() => nav('/upload')}><UploadCloud /> Analyze capture</Button>} />
+      <PageHeader title="Overview"
+        description={one ? <>Tunnels, risk and alerts of one run: <span className="text-text">{one.name}</span></> : 'Tunnels, risk and alerts across the last 20 finished analyses.'}
+        actions={<>
+          {one ? <Button variant="ghost" onClick={() => setSelectedRun(null)}>Show all runs</Button> : null}
+          {one?.source === 'live' ? <Button onClick={() => nav(`/live/${one.id}`)}><RadioTower /> Live view</Button> : null}
+          <Button variant="primary" onClick={() => nav('/upload')}><UploadCloud /> Analyze capture</Button>
+        </>} />
+      {one && !d.analyses_done ? (
+        <p role="note" className="mb-4 rounded-[12px] border border-border px-4 py-3 text-sm text-text-2">
+          {one.source === 'live' ? 'This live session has no analysed chunk yet; the figures below fill in as its sensor sends traffic.' : 'This analysis has not finished yet.'}
+        </p>
+      ) : null}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile label="Analyses" value={num(d.analyses_done)} hint="finished" icon={Waypoints} />
         <StatTile label="Tunnels" value={num(d.inventory.length)} hint="in the inventory below" icon={Network} />
