@@ -36,6 +36,7 @@ export function LivePage() {
           <Button variant="primary" onClick={() => setMode('demo')}><Play /> Start demo sensor</Button>
         </>} />
       <p className="mb-4 text-xs text-text-2">
+        New to live mode? <Link to="/docs/live-sensor" className="text-accent hover:underline">How to run a sensor</Link>.
         All sessions are visible to everyone on this site, so send test traffic only.
       </p>
       <Card>

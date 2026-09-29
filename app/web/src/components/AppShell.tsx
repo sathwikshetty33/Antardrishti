@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Activity, FileText, Gauge, Grid3x3, KeyRound, ListChecks, Moon, PlayCircle, RadioTower, Sun, UploadCloud } from 'lucide-react'
+import { Activity, BookOpen, FileText, Gauge, Grid3x3, KeyRound, ListChecks, Moon, PlayCircle, RadioTower, Sun, UploadCloud } from 'lucide-react'
 import * as React from 'react'
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
@@ -22,6 +22,7 @@ const nav = [
   { to: '/threats', label: 'Threat matrix', icon: Grid3x3 },
   { to: '/replay', label: 'Demo replay', icon: PlayCircle },
   { to: '/reports', label: 'Reports', icon: FileText },
+  { to: '/docs/live-sensor', label: 'Sensor docs', icon: BookOpen },
 ]
 
 export function Sidebar() {
