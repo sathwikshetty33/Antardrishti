@@ -1,6 +1,7 @@
 """antardrishti api (fastapi). on vercel this module is the python function (pyproject.toml
 tool.vercel.entrypoint); locally: uvicorn app.api.index:app --reload --port 8000"""
 import re
+import shutil
 import time
 import uuid
 from pathlib import Path
@@ -106,6 +107,13 @@ def health():
         out["bundle"] = pipeline.bundle_info()["version"]
     except Exception as e:
         out["ok"], out["bundle"] = False, f"error: {e}"
+    # scratch space for a download and its decompressed capture (vercel does not document /tmp's size)
+    try:
+        du = shutil.disk_usage(settings.tmp_dir)
+        out["tmp_free_mb"] = round(du.free / 2 ** 20)
+        out["tmp_total_mb"] = round(du.total / 2 ** 20)
+    except OSError:
+        out["tmp_free_mb"] = None
     return out
 
 
