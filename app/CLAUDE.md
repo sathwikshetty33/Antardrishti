@@ -235,3 +235,12 @@ compose Postgres, uvicorn, Vite).
   `replay_chunks`, 3 demo captures (`app/api/demo`), vendored bundle `app/api/models/v1`
   (checked by `python -m app.api.verify_bundle`). Local timings: demos 1.0-4.6 s, replay step
   0.4-1.5 s. 10 API tests pass against Docker Postgres.
+- **Step 5 done (2026-09-29).** Frontend `app/web`: React 19 + TypeScript (Vite 8), Tailwind 4,
+  shadcn/ui-style components written in `src/components/ui` (Radix primitives; the shadcn CLI's
+  interactive init was not used), ECharts (SVG renderer, tree-shaken), Framer Motion, lucide,
+  TanStack Query (polling with backoff), `@vercel/blob` client uploads. Pages: overview,
+  upload, analyses, analysis, tunnel detail, threat matrix, demo replay, reports (executive,
+  technical; print stylesheet to PDF). Follows the design brief (section 8): tokens in
+  `src/index.css`, dark first with a light toggle, fonts self-hosted. `tsc -b` and oxlint
+  clean; build 0.8 s into `public/`. Screenshots in `app/docs/screenshots`
+  (`python app/docs/screenshots.py`), no console errors.

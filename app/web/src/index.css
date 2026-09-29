@@ -1,0 +1,215 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* design tokens (app/CLAUDE.md section 8): dark first, light under [data-theme=light] */
+:root {
+  color-scheme: dark;
+  --bg: #0b0e14;
+  --surface: #11151d;
+  --surface-2: #171c26;
+  --surface-3: #1e2430;
+  --border: #252c39;
+  --border-strong: #343d4e;
+  --text: #e7eaf0;
+  --text-2: #a4acbb;
+  --muted: #737c8e;
+  --accent: #2dd4bf;
+  --accent-ink: #062a26;
+  --accent-soft: color-mix(in oklab, #2dd4bf 14%, transparent);
+  --critical: #ff6b6b;
+  --high: #ff9f43;
+  --medium: #f5c542;
+  --low: #60a5fa;
+  --info: #94a3b8;
+  --pass: #34d399;
+  --app-voip: #3987e5;
+  --app-video: #d95926;
+  --app-web: #199e70;
+  --app-email: #c98500;
+  --app-icmp: #d55181;
+  --app-bulk: #008300;
+  --app-chat: #9085e9;
+  --app-unknown: #6b7385;
+  --grid: #1f2530;
+  --shadow: 0 1px 0 0 rgb(255 255 255 / 0.02) inset;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-2: #f1f3f6;
+  --surface-3: #e8ebf0;
+  --border: #e2e5eb;
+  --border-strong: #cfd4dd;
+  --text: #0f1320;
+  --text-2: #4a5263;
+  --muted: #6b7385;
+  --accent: #0f766e;
+  --accent-ink: #ffffff;
+  --accent-soft: color-mix(in oklab, #0f766e 10%, transparent);
+  --critical: #c42b2b;
+  --high: #b45309;
+  --medium: #8a6d00;
+  --low: #1d5fd1;
+  --info: #5b6474;
+  --pass: #11804f;
+  --app-voip: #2a78d6;
+  --app-video: #eb6834;
+  --app-web: #1baf7a;
+  --app-email: #eda100;
+  --app-icmp: #e87ba4;
+  --app-bulk: #008300;
+  --app-chat: #4a3aa7;
+  --app-unknown: #8a92a3;
+  --grid: #eceef2;
+  --shadow: 0 1px 2px 0 rgb(16 24 40 / 0.04);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-critical: var(--critical);
+  --color-high: var(--high);
+  --color-medium: var(--medium);
+  --color-low: var(--low);
+  --color-info: var(--info);
+  --color-pass: var(--pass);
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+  --radius-card: 12px;
+  --text-2xs: 12px;
+  --text-xs: 13px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-lg: 20px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+  --text-3xl: 44px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv11", "ss01";
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+/* severity chip: the severity colour on a tint of itself (aa in both themes) */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  padding: 1px 7px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+  color: var(--c);
+  background: color-mix(in oklab, var(--c) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--c) 28%, transparent);
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* print: the reports (executive and technical) print to pdf from the browser */
+@media print {
+  :root,
+  :root[data-theme="light"] {
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #f4f5f7;
+    --surface-3: #eceef2;
+    --border: #d9dde4;
+    --text: #0f1320;
+    --text-2: #3d4453;
+    --muted: #5b6474;
+    --critical: #b42323;
+    --high: #a14a06;
+    --medium: #7a6000;
+    --low: #1d5fd1;
+    --pass: #0f7045;
+    color-scheme: light;
+  }
+  body {
+    background: #fff;
+    font-size: 11pt;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-page {
+    break-after: page;
+  }
+  .avoid-break {
+    break-inside: avoid;
+  }
+  @page {
+    size: A4;
+    margin: 16mm 14mm;
+  }
+}

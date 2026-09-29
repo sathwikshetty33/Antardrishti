@@ -36,7 +36,7 @@ def summary(a):
             "progress": a.progress, "stage": a.stage, "error": a.error, "source": a.source, "name": a.name,
             "size_bytes": a.size_bytes, "bundle_version": a.bundle_version, "schema_version": a.schema_version,
             "timings": a.timings, "risk": a.risk, "risk_band": a.risk_band, "replay": a.replay or None,
-            "tunnel_count": len((a.result or {}).get("tunnels", []))}
+            "tunnel_count": len((a.result or {}).get("tunnels", [])), "packets": (a.counts or {}).get("packets")}
 
 
 def facts_of(s, tid):
