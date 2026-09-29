@@ -5,22 +5,22 @@
 /* design tokens (app/CLAUDE.md section 8): dark first, light under [data-theme=light] */
 :root {
   color-scheme: dark;
-  --bg: #0b0e14;
-  --surface: #11151d;
-  --surface-2: #171c26;
-  --surface-3: #1e2430;
-  --border: #252c39;
-  --border-strong: #343d4e;
-  --text: #e7eaf0;
-  --text-2: #a4acbb;
-  --muted: #737c8e;
-  --accent: #12a38f;          /* the logo teal */
-  --accent-ink: #062a26;
-  --accent-soft: color-mix(in oklab, #12a38f 16%, transparent);
-  --critical: #ff6b6b;
-  --high: #ff9f43;
-  --medium: #f5c542;
-  --low: #60a5fa;
+  --bg: #000000;
+  --surface: rgba(0, 0, 0, 0.8);
+  --surface-2: rgba(10, 30, 25, 0.8);
+  --surface-3: rgba(15, 40, 35, 1);
+  --border: rgba(20, 184, 166, 0.3);
+  --border-strong: rgba(20, 184, 166, 0.6);
+  --text: #f8fafc;
+  --text-2: #14b8a6; /* Hacker green text */
+  --muted: #0f766e;
+  --accent: #14b8a6; /* vibrant green/teal */
+  --accent-ink: #042f2e;
+  --accent-soft: color-mix(in oklab, #14b8a6 15%, transparent);
+  --critical: #ef4444;
+  --high: #f97316;
+  --medium: #eab308;
+  --low: #3b82f6;
   --info: #94a3b8;
   --pass: #34d399;
   --app-voip: #3987e5;
@@ -37,23 +37,23 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f7f8fa;
-  --surface: #ffffff;
-  --surface-2: #f1f3f6;
-  --surface-3: #e8ebf0;
-  --border: #e2e5eb;
-  --border-strong: #cfd4dd;
-  --text: #0f1320;
-  --text-2: #4a5263;
-  --muted: #6b7385;
-  --accent: #0d6b64;
+  --bg: #f8fafc; /* Slate 50 */
+  --surface: rgba(255, 255, 255, 0.6);
+  --surface-2: rgba(255, 255, 255, 0.8);
+  --surface-3: rgba(255, 255, 255, 1);
+  --border: rgba(0, 0, 0, 0.05);
+  --border-strong: rgba(0, 0, 0, 0.1);
+  --text: #0f172a;
+  --text-2: #475569;
+  --muted: #94a3b8;
+  --accent: #0f766e; /* Teal */
   --accent-ink: #ffffff;
-  --accent-soft: color-mix(in oklab, #0d6b64 10%, transparent);
-  --critical: #b42323;
-  --high: #9a4a07;
-  --medium: #735b00;
-  --low: #1a57c2;
-  --info: #5b6474;
+  --accent-soft: rgba(15, 118, 110, 0.15);
+  --critical: #dc2626;
+  --high: #c2410c;
+  --medium: #a16207;
+  --low: #2563eb;
+  --info: #71717a;
   --pass: #0e6e44;
   --app-voip: #2a78d6;
   --app-video: #eb6834;
@@ -107,9 +107,14 @@ body,
 
 body {
   margin: 0;
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image: 
+    linear-gradient(to right, color-mix(in oklab, var(--accent) 15%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--accent) 15%, transparent) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-attachment: fixed;
   color: var(--text);
-  font-family: var(--font-sans);
+  font-family: var(--font-mono); /* Hacker monospace */
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;

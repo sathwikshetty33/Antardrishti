@@ -23,8 +23,8 @@ const nav = [
 
 export function Sidebar() {
   return (
-    <aside className="no-print sticky top-0 hidden h-screen w-[72px] shrink-0 flex-col border-r border-border bg-surface md:flex xl:w-[232px]">
-      <div className="flex h-14 items-center gap-2.5 border-b border-border px-5">
+    <aside className="no-print sticky top-0 hidden h-screen w-[72px] shrink-0 flex-col border-r border-accent/40 bg-black/60 backdrop-blur-3xl backdrop-saturate-150 md:flex xl:w-[232px]">
+      <div className="flex h-14 items-center gap-2.5 border-b border-accent/40 px-5">
         <BrandMark />
         <div className="hidden leading-tight xl:block">
           <div className="text-sm font-semibold tracking-tight">Antardrishti</div>
@@ -34,8 +34,8 @@ export function Sidebar() {
       <nav className="flex flex-1 flex-col gap-1 p-3" aria-label="Main">
         {nav.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end}
-            className={({ isActive }) => cn('flex h-9 items-center gap-3 rounded-lg px-3 text-sm transition-colors',
-              isActive ? 'bg-accent-soft font-medium text-text' : 'text-text-2 hover:bg-surface-2 hover:text-text')}>
+            className={({ isActive }) => cn('flex h-9 items-center gap-3 rounded-lg px-3 text-sm transition-all duration-300',
+              isActive ? 'bg-accent-soft font-medium text-text shadow-sm' : 'text-text-2 hover:bg-surface-2/50 hover:text-text')}>
             {({ isActive }) => (
               <>
                 <n.icon className={cn('size-4 shrink-0', isActive ? 'text-accent' : '')} aria-hidden />
@@ -45,7 +45,7 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
-      <div className="hidden border-t border-border p-4 text-[11px] leading-relaxed text-muted xl:block">
+      <div className="hidden border-t border-accent/40 p-4 text-[11px] leading-relaxed text-accent/80 xl:block">
         Passive analysis of outer headers only. Nothing is decrypted.
       </div>
     </aside>
@@ -115,7 +115,7 @@ function TopBar() {
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 60_000 })
   const ok = health.data?.ok
   return (
-    <header className="no-print sticky top-0 z-30 flex h-14 items-center justify-between gap-4 border-b border-border bg-bg/85 px-4 backdrop-blur md:px-6">
+    <header className="no-print sticky top-0 z-30 flex h-14 items-center justify-between gap-4 border-b border-accent/40 bg-black/60 px-4 backdrop-blur-3xl backdrop-saturate-150 md:px-6 transition-all duration-300">
       <div className="flex items-center gap-3 text-xs text-text-2 md:hidden">
         <BrandMark />
         <span className="text-sm font-semibold text-text">Antardrishti</span>

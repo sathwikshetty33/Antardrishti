@@ -4,15 +4,15 @@ import * as React from 'react'
 import { cn } from '@/lib/utils'
 
 const variants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0 cursor-pointer',
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all duration-300 active:scale-95 disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0 cursor-pointer',
   {
     variants: {
       variant: {
-        primary: 'bg-accent text-accent-ink hover:brightness-110',
-        secondary: 'bg-surface-2 text-text border border-border hover:bg-surface-3',
-        ghost: 'text-text-2 hover:bg-surface-2 hover:text-text',
-        outline: 'border border-border-strong text-text hover:bg-surface-2',
-        danger: 'bg-critical text-white hover:brightness-110',
+        primary: 'bg-accent text-accent-ink shadow-md shadow-accent/20 hover:shadow-lg hover:shadow-accent/40 hover:-translate-y-0.5 hover:brightness-110',
+        secondary: 'bg-surface-2/80 text-text border border-border/50 backdrop-blur-md hover:bg-surface-3 hover:-translate-y-0.5 hover:shadow-md',
+        ghost: 'text-text-2 hover:bg-surface-2/50 hover:text-text',
+        outline: 'border border-border-strong/50 text-text hover:bg-surface-2/80 backdrop-blur-md hover:-translate-y-0.5',
+        danger: 'bg-critical text-white shadow-md shadow-critical/20 hover:shadow-lg hover:shadow-critical/40 hover:-translate-y-0.5 hover:brightness-110',
       },
       size: { sm: 'h-8 px-3 text-xs', md: 'h-9 px-4', lg: 'h-11 px-5 text-base', icon: 'size-9' },
     },
