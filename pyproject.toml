@@ -21,8 +21,7 @@ dependencies = [
 entrypoint = "app.api.index:app"
 
 # the dashboard served by app.frontend() goes to the cdn (the gzip middleware would otherwise keep
-# it in the function). it also stays in the function bundle (about 2 mb): a client route such as
-# /live/{id} is not a file, so it reaches the function, whose index.html fallback needs the build
+# it in the function) and is left out of the function bundle
 [tool.vercel.fastapi.static]
 cdn = true
-exclude = false
+exclude = true
