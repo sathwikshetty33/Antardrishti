@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 import zstandard
+from sqlalchemy import delete
 
 from app.api import models as m
 from app.api import settings
@@ -75,12 +76,26 @@ def check_caps(sess, esp_bytes):
     return None
 
 
+def release(s, sess):
+    """a session that takes no more chunks keeps its analysis but not its capture: the stored
+    chunks only serve to reanalyse the next chunk, and neon's free plan has 512 mb per branch"""
+    s.execute(delete(m.live_chunk).where(m.live_chunk.analysis_id == sess.analysis_id))
+
+
+def finish(s, sess, status, note=""):
+    """completed, stopped or expired: no more chunks"""
+    sess.status = status
+    if note:
+        sess.note = note
+    release(s, sess)
+    s.commit()
+
+
 def refresh_status(s, sess):
     """settle an expired session's stored status (no worker does this, so every read does)"""
     eff = effective_status(sess)
     if eff != sess.status:
-        sess.status = eff
-        s.commit()
+        finish(s, sess, eff)
     return eff
 
 

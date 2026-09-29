@@ -454,8 +454,7 @@ def live_ingest(s, sess, seq, esp_raw, ike_raw):
             ike_path.unlink(missing_ok=True)
     note = live.check_caps(sess, esp_size)
     if note:
-        sess.status, sess.note = "completed", note
-        s.commit()
+        live.finish(s, sess, "completed", note)
     return a, n
 
 
@@ -494,8 +493,7 @@ def live_demo_next(sid: str, req: demo_step, x_sensor_key: str | None = Header(N
     data, _, _ = replay.chunk(d["name"], req.seq)
     a, n = live_ingest(s, sess, req.seq, head + data, None)
     if req.seq + 1 >= steps and sess.status != "completed":
-        sess.status, sess.note = "completed", f"the recorded demo capture ended ({steps} slices of 5 s)"
-        s.commit()
+        live.finish(s, sess, "completed", f"the recorded demo capture ended ({steps} slices of 5 s)")
     return {**live_summary(s, sess), "packets_in_chunk": n, "analysis": summary(a),
             "demo": {"name": d["name"], "step": req.seq + 1, "steps": steps}}
 
@@ -506,8 +504,7 @@ def live_stop(sid: str, x_sensor_key: str | None = Header(None), s: Session = De
     if not live.check_key(sess, x_sensor_key):
         raise HTTPException(403, "missing or wrong sensor key (x-sensor-key)")
     if sess.status in ("waiting", "live"):
-        sess.status = "stopped"
-        s.commit()
+        live.finish(s, sess, "stopped")
     return live_summary(s, sess)
 
 

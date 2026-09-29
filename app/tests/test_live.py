@@ -264,6 +264,10 @@ def test_demo_sensor_slices(monkeypatch):
         assert last.status_code == 200, last.text
     assert last.json()["status"] == "completed" and "demo capture ended" in last.json()["note"]
     assert last.json()["chunks"] == steps
+    # a finished session keeps its analysis, not its stored chunks
+    with db.session() as s:
+        assert s.query(m.live_chunk).filter(m.live_chunk.analysis_id == a["id"]).count() == 0
+    assert c.get(f"/api/analyses/{a['id']}/tunnels").json()
     after = c.post(url, json={"demo": "ikev1-aggressive", "seq": steps}, headers={"x-sensor-key": a["key"]})
     assert after.status_code == 410
     b = create_session()
