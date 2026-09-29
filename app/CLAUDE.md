@@ -267,11 +267,14 @@ compose Postgres, uvicorn, Vite).
   Neon project `antardrishti` (`sparkling-hill-44536745`, `aws-us-east-1`, Postgres 17) created
   with the Neon MCP server; `DATABASE_URL` (pooled) and `DATABASE_URL_UNPOOLED` (direct) stored as
   sensitive Vercel variables. Replay chunks are zstd-compressed in Postgres (Neon free plan: 512 MB
-  per branch). Production URL: https://antardrishti-sathwik-shettys-projects.vercel.app (Vercel
-  Authentication on: only members of the Vercel team can open it).
+  per branch). Production URL: https://antardrishti-sathwik-shettys-projects.vercel.app.
 - **Live verification (2026-09-29).** Build: bundle check passes, migrations run in the build
   ("database at head", 10 tables in Neon). On the live site: health ok (db, bundle v1, `/tmp`
   525 MB), SPA deep links served from the CDN, one-click mixture demo analysed in 2.7 s, a 10 MB
   browser upload through the Blob client-token handshake (Python-signed) fetched back in 0.3 s and
   analysed in 3.1 s, a full 18-step replay. Captures are fetched and decompressed one at a time
   so `/tmp` stays at or below 400 MB.
+- **Public (2026-09-29, owner's decision).** Vercel Authentication switched off: the site is
+  public at https://antardrishti-zeta.vercel.app (and the project URL above); a logged-out visitor
+  loads the dashboard and runs a demo. `APP_ACCESS_KEY` is not set, so anyone can also upload
+  captures (up to 100 MB each) to the Blob store and start analyses.

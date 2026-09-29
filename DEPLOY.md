@@ -108,6 +108,10 @@ or analyse it locally with `python -m analyzer.cli analyze <pcap> --out result.j
 
 ## Things to know
 
+- **This deployment is public** (Vercel Authentication off, by the owner's choice):
+  https://antardrishti-zeta.vercel.app. With `APP_ACCESS_KEY` unset, visitors can upload
+  captures and start analyses too. Set the key to restrict that (the UI asks for it once).
+
 - **Cold starts:** the first request after a pause loads numpy and the models, a few seconds.
 - **Neon free plan** suspends idle compute; the first query after a pause takes a moment.
 - **Blob usage** counts against the Hobby quota. Delete old captures from the store's
