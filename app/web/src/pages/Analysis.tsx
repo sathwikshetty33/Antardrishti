@@ -54,8 +54,8 @@ export function AnalysisPage() {
           <Button onClick={() => nav(`/reports/${id}/executive`)}><FileText /> Executive report</Button>
           <Button onClick={() => nav(`/reports/${id}/technical`)}><FileText /> Technical report</Button>
         </>} />
-      <div className="grid gap-4 lg:grid-cols-4">
-        <Card className="lg:row-span-2">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        <Card className="col-span-2 lg:col-span-1 lg:row-span-2">
           <CardHeader><div><CardTitle>Risk</CardTitle><CardDescription>worst tunnel</CardDescription></div></CardHeader>
           <CardContent className="flex justify-center"><RiskGauge score={x.risk} /></CardContent>
         </Card>
@@ -71,7 +71,7 @@ export function AnalysisPage() {
         {tunnels.isLoading ? <CardContent><CardSkeleton rows={3} /></CardContent> : tunnels.error ? <ErrorState error={tunnels.error} /> :
           tunnels.data?.length ? (
             <Table>
-              <thead><tr><Th>#</Th><Th>Initiator → responder</Th><Th>Handshake</Th><Th>ESP suite</Th><Th>Mode</Th><Th>Top traffic</Th><Th className="text-right">ESP packets</Th><Th>Risk</Th></tr></thead>
+              <thead><tr><Th>#</Th><Th>Initiator → responder</Th><Th>Handshake</Th><Th>ESP suite</Th><Th className="hidden md:table-cell">Mode</Th><Th className="hidden md:table-cell">Top traffic</Th><Th className="hidden md:table-cell text-right">ESP packets</Th><Th>Risk</Th></tr></thead>
               <tbody>
                 {tunnels.data.map((t) => {
                   const top = [...t.shares].filter((s) => s.app !== 'unknown').sort((a, b) => b.byte_share - a.byte_share).slice(0, 2)
@@ -81,9 +81,9 @@ export function AnalysisPage() {
                       <Td className="num text-xs"><Link to={`/analyses/${id}/tunnels/${t.idx}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>{t.initiator ?? '?'} → {t.responder.join(', ') || '?'}</Link></Td>
                       <Td><StatusBadge status={t.handshake_status} /></Td>
                       <Td>{t.facts.esp_suite ? <span className="flex items-center gap-2 text-xs">{factValue(t.facts.esp_suite.value)} <ConfidenceBadge value={t.facts.esp_suite.confidence} /></span> : <span className="text-xs text-muted">no ESP</span>}</Td>
-                      <Td className="text-xs">{t.facts.mode ? factValue(t.facts.mode.value) : '-'}</Td>
-                      <Td className="text-xs">{top.length && top[0].byte_rounded > 0 ? top.filter((s) => s.byte_rounded > 0).map((s) => `${appLabel[s.app]} ${s.byte_rounded}%`).join(' · ') : <span className="text-muted">-</span>}</Td>
-                      <Td className="num text-right">{num(t.esp_packets)}</Td>
+                      <Td className="hidden md:table-cell text-xs">{t.facts.mode ? factValue(t.facts.mode.value) : '-'}</Td>
+                      <Td className="hidden md:table-cell text-xs">{top.length && top[0].byte_rounded > 0 ? top.filter((s) => s.byte_rounded > 0).map((s) => `${appLabel[s.app]} ${s.byte_rounded}%`).join(' · ') : <span className="text-muted">-</span>}</Td>
+                      <Td className="hidden md:table-cell num text-right">{num(t.esp_packets)}</Td>
                       <Td>{t.risk ? <BandBadge band={t.risk.band} score={t.risk.score} /> : '-'}</Td>
                     </Tr>
                   )
@@ -112,19 +112,19 @@ export function AnalysesPage() {
         {q.isLoading ? <CardContent className="pt-5"><CardSkeleton rows={6} /></CardContent> : q.error ? <ErrorState error={q.error} retry={() => q.refetch()} /> :
           q.data?.length ? (
             <Table>
-              <thead><tr><Th>Name</Th><Th>Source</Th><Th>Status</Th><Th>Risk</Th><Th className="text-right">Tunnels</Th><Th className="text-right">Size</Th><Th className="text-right">Time</Th><Th>Bundle</Th><Th className="text-right">Created</Th></tr></thead>
+              <thead><tr><Th>Name</Th><Th className="hidden sm:table-cell">Source</Th><Th>Status</Th><Th>Risk</Th><Th className="hidden md:table-cell text-right">Tunnels</Th><Th className="hidden md:table-cell text-right">Size</Th><Th className="hidden md:table-cell text-right">Time</Th><Th className="hidden md:table-cell">Bundle</Th><Th className="hidden sm:table-cell text-right">Created</Th></tr></thead>
               <tbody>
                 {q.data.map((a) => (
                   <Tr key={a.id} className="cursor-pointer" onClick={() => nav(`/analyses/${a.id}`)}>
-                    <Td className="max-w-[320px] truncate">{a.name}</Td>
-                    <Td className="text-xs capitalize text-text-2">{a.source}</Td>
+                    <Td className="max-w-[150px] truncate sm:max-w-[320px]">{a.name}</Td>
+                    <Td className="hidden sm:table-cell text-xs capitalize text-text-2">{a.source}</Td>
                     <Td><StatusBadge status={a.status} /></Td>
                     <Td>{a.risk != null ? <BandBadge band={a.risk_band} score={a.risk} /> : '-'}</Td>
-                    <Td className="num text-right">{a.tunnel_count}</Td>
-                    <Td className="num text-right text-xs">{bytes(a.size_bytes)}</Td>
-                    <Td className="num text-right text-xs">{seconds(a.timings?.total_s)}</Td>
-                    <Td className="num text-xs text-text-2">{a.bundle_version || '-'}</Td>
-                    <Td className="text-right text-xs text-muted">{when(a.created_at)}</Td>
+                    <Td className="hidden md:table-cell num text-right">{a.tunnel_count}</Td>
+                    <Td className="hidden md:table-cell num whitespace-nowrap text-right text-xs">{bytes(a.size_bytes)}</Td>
+                    <Td className="hidden md:table-cell num whitespace-nowrap text-right text-xs">{seconds(a.timings?.total_s)}</Td>
+                    <Td className="hidden md:table-cell num text-xs text-text-2">{a.bundle_version || '-'}</Td>
+                    <Td className="hidden sm:table-cell text-right text-xs text-muted">{when(a.created_at)}</Td>
                   </Tr>
                 ))}
               </tbody>

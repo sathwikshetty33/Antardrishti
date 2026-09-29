@@ -35,16 +35,16 @@ export function ReportsPage() {
       <Card>
         {pending.isLoading ? <div className="p-5"><CardSkeleton rows={5} /></div> : pending.error ? <ErrorState error={pending.error} /> : done.length ? (
           <Table>
-            <thead><tr><Th>Analysis</Th><Th>Risk</Th><Th className="text-right">Tunnels</Th><Th className="text-right">Created</Th><Th /></tr></thead>
+            <thead><tr><Th>Analysis</Th><Th>Risk</Th><Th className="hidden md:table-cell text-right">Tunnels</Th><Th className="hidden sm:table-cell text-right">Created</Th><Th /></tr></thead>
             <tbody>
               {done.map((a) => (
                 <Tr key={a.id}>
-                  <Td className="max-w-[360px] truncate">{a.name}</Td>
+                  <Td className="max-w-[120px] truncate sm:max-w-[360px]">{a.name}</Td>
                   <Td><BandBadge band={a.risk_band} score={a.risk} /></Td>
-                  <Td className="num text-right">{a.tunnel_count}</Td>
-                  <Td className="text-right text-xs text-muted">{when(a.created_at)}</Td>
+                  <Td className="hidden md:table-cell num text-right">{a.tunnel_count}</Td>
+                  <Td className="hidden sm:table-cell text-right text-xs text-muted">{when(a.created_at)}</Td>
                   <Td className="text-right">
-                    <div className="flex justify-end gap-2">
+                    <div className="flex flex-col items-end gap-2 sm:flex-row sm:justify-end">
                       <Button size="sm" onClick={() => nav(`/reports/${a.id}/executive`)}><FileText /> Executive</Button>
                       <Button size="sm" onClick={() => nav(`/reports/${a.id}/technical`)}><FileText /> Technical</Button>
                     </div>
@@ -73,22 +73,22 @@ function Section({ title, children, className }: { title: string; children: Reac
 function ReportFrame({ r, kind, children }: { r: Report; kind: string; children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-bg">
-      <div className="no-print sticky top-0 z-10 flex items-center justify-between border-b border-border bg-surface px-6 py-3">
-        <Link to={`/analyses/${r.analysis.id}`} className="inline-flex items-center gap-1.5 text-sm text-text-2 hover:text-text"><ArrowLeft className="size-4" /> Back to the analysis</Link>
-        <Button variant="primary" onClick={() => window.print()}><Printer /> Print or save as PDF</Button>
+      <div className="no-print sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-border bg-surface px-4 py-3 sm:px-6">
+        <Link to={`/analyses/${r.analysis.id}`} className="inline-flex items-center gap-1.5 text-sm text-text-2 hover:text-text"><ArrowLeft className="size-4" /> Back<span className="hidden sm:inline"> to the analysis</span></Link>
+        <Button variant="primary" onClick={() => window.print()}><Printer /> <span className="sm:hidden">Save as PDF</span><span className="hidden sm:inline">Print or save as PDF</span></Button>
       </div>
-      <article className="mx-auto max-w-[900px] px-8 py-10 text-sm">
-        <header className="flex items-start justify-between gap-6 border-b border-border pb-5">
-          <div>
+      <article className="mx-auto max-w-[900px] px-4 py-6 text-sm sm:px-8 sm:py-10">
+        <header className="flex flex-col-reverse gap-4 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+          <div className="min-w-0">
             <p className="text-xs uppercase tracking-wider text-muted">{kind} report</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight">{r.analysis.name}</h1>
+            <h1 className="mt-1 break-words text-xl font-semibold tracking-tight sm:text-2xl">{r.analysis.name}</h1>
             <p className="mt-1 text-xs text-text-2">
               Analysed {r.analysis.finished_at ? new Date(r.analysis.finished_at).toLocaleString('en-GB') : '-'} · {r.tunnels.length} tunnel{r.tunnels.length === 1 ? '' : 's'} ·
               model bundle {r.model.version} ({r.model.commit?.slice(0, 7)}) · contract {r.model.schema_version}
             </p>
           </div>
-          <div className="flex shrink-0 flex-col items-end gap-2">
-            <BrandLogo variant="light" className="w-40" />
+          <div className="flex shrink-0 items-center justify-between gap-2 sm:flex-col sm:items-end">
+            <BrandLogo variant="light" className="w-28 sm:w-40" />
             <span className="text-xs text-muted num">{r.analysis.id.slice(0, 8)}</span>
           </div>
         </header>
@@ -127,7 +127,7 @@ export function ExecutiveReport() {
   const nd = r.findings.filter((f) => f.verdict === 'not determinable')
   return (
     <ReportFrame r={r} kind="Executive">
-      <div className="mt-6 grid grid-cols-[240px_1fr] items-center gap-8">
+      <div className="mt-6 grid items-center justify-items-center gap-6 sm:grid-cols-[240px_1fr] sm:justify-items-stretch sm:gap-8">
         <RiskGauge score={r.overall?.score ?? null} caption="0-100, worst tunnel; confident critical findings set a floor of 90" />
         <div className="space-y-2">
           <p className="text-base">
@@ -190,7 +190,7 @@ export function TechnicalReport() {
   return (
     <ReportFrame r={r} kind="Technical">
       <Section title="Summary">
-        <div className="grid grid-cols-4 gap-3 text-xs">
+        <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
           <div><div className="text-muted">Overall risk</div><div className="num text-lg font-semibold">{r.overall?.score ?? '-'}</div></div>
           <div><div className="text-muted">Tunnels</div><div className="num text-lg font-semibold">{r.tunnels.length}</div></div>
           <div><div className="text-muted">Analysis time</div><div className="num text-lg font-semibold">{seconds(r.analysis.timings?.total_s)}</div></div>
@@ -214,7 +214,7 @@ export function TechnicalReport() {
           </Section>
           {t.shares.length ? (
             <Section title="Traffic shares">
-              <div className="grid grid-cols-2 gap-6">
+              <div className="grid gap-6 sm:grid-cols-2">
                 <ShareBar shares={t.shares} />
                 <Table>
                   <thead><tr><Th>App</Th><Th className="text-right">Bytes</Th><Th className="text-right">Error bar</Th><Th className="text-right">Active time</Th></tr></thead>
@@ -267,7 +267,7 @@ export function TechnicalReport() {
         ) : <p className="text-text-2">No threats: no check failed or warned.</p>}
       </Section>
       <Section title="Model and methodology">
-        <ul className="list-disc space-y-1.5 pl-5 text-xs text-text-2">
+        <ul className="list-disc space-y-1.5 break-words pl-5 text-xs text-text-2">
           <li>Model bundle {r.model.version}, commit {r.model.commit}, {r.model.models} LightGBM models (3 config, 7 presence, 7 share), seed {r.model.seed}; data releases {r.model.data_releases.join(', ')}.</li>
           <li>Parser: outer IP fragments reassembled; packets grouped into tunnels by address pair, NAT-T ports, IKE SPIs and ESP SPIs; IKE read in the clear where captured.</li>
           <li>Config models read ESP length residues and minimum sizes (suite, mode) and CREATE_CHILD_SA sizes (PFS). Traffic models classify 2-second windows from sizes, timing, bursts and FFT; shares are byte-weighted, absent apps zeroed, rounded to 100 by largest remainder.</li>

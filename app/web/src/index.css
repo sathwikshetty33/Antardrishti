@@ -6,13 +6,13 @@
 :root {
   color-scheme: dark;
   --bg: #000000;
-  --surface: rgba(0, 0, 0, 0.8);
-  --surface-2: rgba(10, 30, 25, 0.8);
-  --surface-3: rgba(15, 40, 35, 1);
+  --surface: #030807;
+  --surface-2: #081814;
+  --surface-3: #0f2823;
   --border: rgba(20, 184, 166, 0.3);
   --border-strong: rgba(20, 184, 166, 0.6);
   --text: #f8fafc;
-  --text-2: #14b8a6; /* Hacker green text */
+  --text-2: #14b8a6; /* hacker green text */
   --muted: #0f766e;
   --accent: #14b8a6; /* vibrant green/teal */
   --accent-ink: #042f2e;
@@ -33,27 +33,35 @@
   --app-unknown: #6b7385;
   --grid: #1f2530;
   --shadow: 0 1px 0 0 rgb(255 255 255 / 0.02) inset;
+  /* the glass panels (cards, sidebar, top bar) over the page grid */
+  --glass: rgb(0 0 0 / 0.6);
+  --glass-hover: rgb(0 0 0 / 0.5);
+  --edge: rgb(20 184 166 / 0.4);
+  --edge-strong: rgb(20 184 166 / 0.8);
+  --glow: 0 0 15px rgb(20 184 166 / 0.1);
+  --glow-hover: 0 0 25px rgb(20 184 166 / 0.25);
+  --grid-line: rgb(20 184 166 / 0.15);
 }
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f8fafc; /* Slate 50 */
-  --surface: rgba(255, 255, 255, 0.6);
-  --surface-2: rgba(255, 255, 255, 0.8);
-  --surface-3: rgba(255, 255, 255, 1);
-  --border: rgba(0, 0, 0, 0.05);
-  --border-strong: rgba(0, 0, 0, 0.1);
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --surface-3: #e2e8f0;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
   --text: #0f172a;
   --text-2: #475569;
-  --muted: #94a3b8;
-  --accent: #0f766e; /* Teal */
+  --muted: #64748b;
+  --accent: #0f766e;
   --accent-ink: #ffffff;
-  --accent-soft: rgba(15, 118, 110, 0.15);
-  --critical: #dc2626;
-  --high: #c2410c;
-  --medium: #a16207;
-  --low: #2563eb;
-  --info: #71717a;
+  --accent-soft: rgba(15, 118, 110, 0.12);
+  --critical: #b42323;
+  --high: #9a4a07;
+  --medium: #735b00;
+  --low: #1a57c2;
+  --info: #5b6474;
   --pass: #0e6e44;
   --app-voip: #2a78d6;
   --app-video: #eb6834;
@@ -65,6 +73,13 @@
   --app-unknown: #8a92a3;
   --grid: #eceef2;
   --shadow: 0 1px 2px 0 rgb(16 24 40 / 0.04);
+  --glass: rgb(255 255 255 / 0.78);
+  --glass-hover: rgb(255 255 255 / 0.92);
+  --edge: rgb(15 118 110 / 0.2);
+  --edge-strong: rgb(15 118 110 / 0.5);
+  --glow: 0 1px 2px rgb(15 23 42 / 0.05), 0 1px 3px rgb(15 23 42 / 0.04);
+  --glow-hover: 0 10px 28px -10px rgb(15 118 110 / 0.3);
+  --grid-line: rgb(15 118 110 / 0.07);
 }
 
 @theme inline {
@@ -86,6 +101,12 @@
   --color-low: var(--low);
   --color-info: var(--info);
   --color-pass: var(--pass);
+  --color-glass: var(--glass);
+  --color-glass-hover: var(--glass-hover);
+  --color-edge: var(--edge);
+  --color-edge-strong: var(--edge-strong);
+  --shadow-glow: var(--glow);
+  --shadow-glow-hover: var(--glow-hover);
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
   --radius-card: 12px;
@@ -108,17 +129,27 @@ body,
 body {
   margin: 0;
   background-color: var(--bg);
-  background-image: 
-    linear-gradient(to right, color-mix(in oklab, var(--accent) 15%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in oklab, var(--accent) 15%, transparent) 1px, transparent 1px);
-  background-size: 40px 40px;
-  background-attachment: fixed;
   color: var(--text);
-  font-family: var(--font-mono); /* Hacker monospace */
+  font-family: var(--font-mono); /* hacker monospace */
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
   font-feature-settings: "cv11", "ss01";
+}
+
+/* the page grid on its own fixed layer: no repaint on scroll (background-attachment: fixed
+   repaints every frame on phones, and ios ignores it) */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 40px 40px;
 }
 
 .num {
@@ -160,6 +191,25 @@ body {
   border-radius: 8px;
 }
 
+/* the phone navigation drawer slides in from the left */
+@keyframes drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @keyframes shimmer {
   from {
     background-position: 200% 0;
@@ -198,11 +248,17 @@ body {
     --medium: #7a6000;
     --low: #1d5fd1;
     --pass: #0f7045;
+    --glass: #ffffff;
+    --edge: #d9dde4;
+    --glow: none;
     color-scheme: light;
   }
   body {
     background: #fff;
     font-size: 11pt;
+  }
+  body::before {
+    display: none;
   }
   .no-print {
     display: none !important;

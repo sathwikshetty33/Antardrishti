@@ -9,15 +9,18 @@ export function FindingRow({ f, onOpen, showTunnel }: { f: Finding; onOpen: () =
   return (
     <button type="button" onClick={onOpen}
       className="group flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left transition-colors last:border-0 hover:bg-surface-2 cursor-pointer">
-      <div className="w-[140px] shrink-0">
-        {f.verdict === 'fail' || f.verdict === 'warn' ? <SeverityBadge severity={f.severity} /> : <VerdictBadge verdict={f.verdict} />}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 text-xs text-muted">
-          <span className="num">{f.check_id}</span>
-          {showTunnel && f.tunnel != null ? <span>· tunnel {f.tunnel}</span> : null}
+      {/* phones: the badge above the text, which gets the full width and two lines */}
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+        <div className="shrink-0 sm:w-[140px]">
+          {f.verdict === 'fail' || f.verdict === 'warn' ? <SeverityBadge severity={f.severity} /> : <VerdictBadge verdict={f.verdict} />}
         </div>
-        <p className="truncate text-sm text-text">{f.text}</p>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-xs text-muted">
+            <span className="num">{f.check_id}</span>
+            {showTunnel && f.tunnel != null ? <span className="whitespace-nowrap">· tunnel {f.tunnel}</span> : null}
+          </div>
+          <p className="line-clamp-2 text-sm text-text sm:line-clamp-1">{f.text}</p>
+        </div>
       </div>
       <div className="hidden shrink-0 sm:block"><ConfidenceBadge value={f.confidence} /></div>
       <ChevronRight className="size-4 shrink-0 text-muted group-hover:text-text" aria-hidden />

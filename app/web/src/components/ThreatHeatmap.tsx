@@ -22,7 +22,7 @@ export function ThreatHeatmap({ threats, selected, onSelect }: {
                 onClick={() => onSelect(ts.length ? (selected === key ? null : key) : null)}
                 disabled={!ts.length}
                 aria-label={`likelihood ${l}, impact ${i}: ${ts.length ? ts.map((t) => t.threat).join(', ') : 'no threats'}`}
-                className={cn('relative flex min-h-[76px] flex-col items-start justify-between rounded-lg border p-2 text-left transition-all',
+                className={cn('relative flex min-h-[56px] min-w-0 flex-col items-start justify-between rounded-lg border p-1.5 text-left transition-all sm:min-h-[76px] sm:p-2',
                   ts.length ? 'cursor-pointer hover:brightness-110' : 'cursor-default',
                   selected === key ? 'border-text ring-2 ring-accent' : 'border-border')}
                 style={{ background: `color-mix(in oklab, var(--critical) ${Math.round(6 + heat * 52)}%, var(--surface-2))` }}

@@ -37,8 +37,13 @@ function FactRow({ name, f }: { name: string; f: Fact }) {
     <Tr>
       <Td className="w-[38%] text-xs text-text-2">{labels[name] ?? name}</Td>
       <Td className="num break-words text-xs">{v}</Td>
-      <Td className="w-[1%] whitespace-nowrap"><ConfidenceBadge value={f.value === 'not determinable' ? null : f.confidence} /></Td>
-      <Td className="w-[1%] whitespace-nowrap"><SourceBadge source={f.source} /></Td>
+      <Td className="w-[1%] whitespace-nowrap">
+        <div className="flex flex-col items-start gap-1">
+          <ConfidenceBadge value={f.value === 'not determinable' ? null : f.confidence} />
+          <span className="sm:hidden"><SourceBadge source={f.source} /></span>
+        </div>
+      </Td>
+      <Td className="hidden sm:table-cell w-[1%] whitespace-nowrap"><SourceBadge source={f.source} /></Td>
     </Tr>
   )
 }
@@ -69,7 +74,7 @@ export function TunnelPage() {
               <Card key={g.title}>
                 <CardHeader><div><CardTitle>{g.title}</CardTitle><CardDescription>{g.hint}</CardDescription></div></CardHeader>
                 {rows.length ? (
-                  <Table><thead><tr><Th>Fact</Th><Th>Value</Th><Th>Confidence</Th><Th>Source</Th></tr></thead>
+                  <Table><thead><tr><Th>Fact</Th><Th>Value</Th><Th>Confidence</Th><Th className="hidden sm:table-cell">Source</Th></tr></thead>
                     <tbody>{rows.map((k) => <FactRow key={k} name={k} f={t.facts[k]} />)}</tbody></Table>
                 ) : <p className="px-5 pb-5 text-xs text-text-2">Not in this capture{g.title.startsWith('Handshake') ? ' (it started after the tunnel was set up)' : ''}.</p>}
                 {g.title.startsWith('ESP') && probs ? (

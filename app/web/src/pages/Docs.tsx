@@ -38,7 +38,7 @@ export function LiveSensorDocs() {
             {sections.map(([id, t]) => <li key={id}><a href={`#${id}`} className="text-text-2 hover:text-text">{t}</a></li>)}
           </ol>
         </nav>
-        <article className="max-w-3xl text-sm leading-relaxed text-text-2 [&_strong]:text-text">
+        <article className="min-w-0 max-w-3xl text-sm leading-relaxed text-text-2 [&_strong]:text-text">
           <H id="what">What live mode is</H>
           <p className="mt-3">
             A live session analyses IPsec traffic as it happens. A small agent, on a machine that sees the traffic, captures the

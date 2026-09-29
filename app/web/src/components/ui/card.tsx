@@ -2,7 +2,10 @@ import * as React from 'react'
 import { cn } from '@/lib/utils'
 
 export function Card({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('rounded-[16px] border border-accent/40 bg-black/60 shadow-[0_0_15px_rgba(20,184,166,0.1)] backdrop-blur-3xl backdrop-saturate-150 transition-all duration-300 hover:shadow-[0_0_25px_rgba(20,184,166,0.25)] hover:border-accent/80 hover:bg-black/50 hover:-translate-y-1', className)} {...p} />
+  // glass over the page grid, from the theme tokens; min-w-0 lets a card shrink in a grid or flex
+  // track (a wide table then scrolls inside it instead of widening the page). the heavy blur
+  // only from md up: every card blurs what is behind it, which phones pay for on each scroll
+  return <div className={cn('min-w-0 rounded-[16px] border border-edge bg-glass shadow-glow backdrop-blur-md backdrop-saturate-150 transition-all duration-300 hover:-translate-y-1 hover:border-edge-strong hover:bg-glass-hover hover:shadow-glow-hover md:backdrop-blur-3xl', className)} {...p} />
 }
 
 export function CardHeader({ className, ...p }: React.HTMLAttributes<HTMLDivElement>) {

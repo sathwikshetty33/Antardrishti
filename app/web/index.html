@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Antardrishti · See inside the tunnel</title>
     <meta name="description" content="Antardrishti: passive IPsec VPN analysis. Configuration inference, traffic classification and a standards-based security assessment, without decrypting anything." />
-    <meta name="theme-color" content="#0b0e14" />
+    <meta name="theme-color" content="#000000" />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
@@ -23,7 +23,12 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:image" content="https://antardrishti-zeta.vercel.app/brand/og-image.png" />
     <script>
-      try { if (localStorage.getItem('antar-theme') === 'light') document.documentElement.dataset.theme = 'light' } catch (e) {}
+      try {
+        if (localStorage.getItem('antar-theme') === 'light') {
+          document.documentElement.dataset.theme = 'light'
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#f8fafc')
+        }
+      } catch (e) {}
     </script>
   </head>
   <body>

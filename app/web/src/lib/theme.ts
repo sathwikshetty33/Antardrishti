@@ -5,8 +5,14 @@ export function currentTheme(): Theme {
   return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
 }
 
+// the phone browser's toolbar follows the page background (index.html sets it before the first paint)
+function toolbar(t: Theme) {
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t === 'light' ? '#f8fafc' : '#000000')
+}
+
 export function setTheme(t: Theme) {
   document.documentElement.dataset.theme = t
+  toolbar(t)
   try {
     localStorage.setItem('antar-theme', t)
   } catch {
@@ -23,4 +29,5 @@ export function initTheme() {
     // ignore
   }
   document.documentElement.dataset.theme = t
+  toolbar(t)
 }

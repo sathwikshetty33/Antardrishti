@@ -175,7 +175,8 @@ Built into `public/` and served from the CDN.
   `#e87ba4`, `#008300`, `#4a3aa7`); unknown is neutral grey `#6b7385`.
 - **Type:** Inter for UI, JetBrains Mono for numbers, IDs and hashes (tabular figures).
   Scale 12 / 13 / 14 (body) / 16 / 20 / 24 / 32 / 44 (gauge value); weights 400, 500, 600.
-- **Layout:** fixed left sidebar 232 px (collapses to icons below 1280 px), top bar 56 px,
+- **Layout:** fixed left sidebar 232 px that collapses to 72 px of icons with a toggle (kept per
+  browser; icons by default below 1280 px), a drawer from the top bar's menu button below 768 px, top bar 56 px,
   content max 1600 px, 12-column grid with 24 px gutters (16 px below 1280), 8 px spacing
   unit, card radius 12 px, 1 px borders instead of shadows in dark.
 - **Components:** AppShell, Sidebar, TopBar (bundle version, theme toggle), Card,

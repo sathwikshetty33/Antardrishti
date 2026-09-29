@@ -50,22 +50,22 @@ export function ThreatsPage() {
             <CardContent>
               <div className="flex gap-2">
                 <div className="flex items-center"><span className="-rotate-90 whitespace-nowrap text-xs text-text-2">Likelihood →</span></div>
-                <div className="flex-1"><ThreatHeatmap threats={threats} selected={cell} onSelect={(c) => { setCell(c); setPick(null) }} /></div>
+                <div className="min-w-0 flex-1"><ThreatHeatmap threats={threats} selected={cell} onSelect={(c) => { setCell(c); setPick(null) }} /></div>
               </div>
             </CardContent>
           </Card>
           <Card className="xl:col-span-3">
             <CardHeader><div><CardTitle>{cell ? `Threats in cell ${cell.replace('-', ' × ')}` : 'All threats'}</CardTitle><CardDescription>highest likelihood × impact first</CardDescription></div></CardHeader>
             <Table>
-              <thead><tr><Th>Threat</Th><Th className="text-right">Likelihood</Th><Th className="text-right">Impact</Th><Th>Tunnels</Th><Th className="text-right">Findings</Th></tr></thead>
+              <thead><tr><Th>Threat</Th><Th className="text-right">Likelihood</Th><Th className="text-right">Impact</Th><Th className="hidden sm:table-cell">Tunnels</Th><Th className="hidden sm:table-cell text-right">Findings</Th></tr></thead>
               <tbody>
                 {inCell.map((t) => (
                   <Tr key={t.threat_id} className={cn('cursor-pointer', pick === t.threat_id && 'bg-accent-soft')} onClick={() => setPick(t.threat_id)}>
                     <Td><div className="text-sm">{t.threat}</div><div className="num text-xs text-muted">{t.threat_id}</div></Td>
                     <Td className="num text-right">{t.likelihood}</Td>
                     <Td className="num text-right">{t.impact}</Td>
-                    <Td className="num text-xs">{t.tunnels.map((x) => `#${x}`).join(', ')}</Td>
-                    <Td className="num text-right">{t.findings.length}</Td>
+                    <Td className="hidden sm:table-cell num text-xs">{t.tunnels.map((x) => `#${x}`).join(', ')}</Td>
+                    <Td className="hidden sm:table-cell num text-right">{t.findings.length}</Td>
                   </Tr>
                 ))}
               </tbody>

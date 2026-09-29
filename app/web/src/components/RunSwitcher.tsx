@@ -45,10 +45,10 @@ export function RunSwitcher() {
   }
 
   return (
-    <label className="flex min-w-0 items-center gap-2 text-xs text-text-2">
+    <label className="flex min-w-0 flex-1 items-center gap-2 text-xs text-text-2 sm:flex-none">
       <span className="hidden lg:inline">Run</span>
       <select value={value} onChange={(e) => choose(e.target.value)} aria-label="Run the views show"
-        className="h-8 w-[170px] min-w-0 truncate rounded-lg border border-border-strong bg-surface-2 px-2 text-xs text-text sm:w-[240px] xl:w-[300px]">
+        className="h-8 w-full min-w-0 truncate rounded-lg border border-border-strong bg-surface-2 px-2 text-xs text-text sm:w-[240px] xl:w-[300px]">
         <option value="all">All runs</option>
         {live.length ? (
           <optgroup label="Live sessions">

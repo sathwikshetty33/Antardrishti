@@ -66,7 +66,7 @@ export function Overview() {
           {one.source === 'live' ? 'This live session has no analysed chunk yet; the figures below fill in as its sensor sends traffic.' : 'This analysis has not finished yet.'}
         </p>
       ) : null}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
         <StatTile label="Analyses" value={num(d.analyses_done)} hint="finished" icon={Waypoints} />
         <StatTile label="Tunnels" value={num(d.inventory.length)} hint="in the inventory below" icon={Network} />
         <StatTile label="High and critical alerts" value={num(d.alerts.length)} hint={`${crit} critical`} icon={ShieldAlert} />
@@ -87,7 +87,7 @@ export function Overview() {
                 className="flex items-center gap-3 border-b border-border px-5 py-3 last:border-0 hover:bg-surface-2">
                 <SeverityBadge severity={a.severity} />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm">{a.text}</p>
+                  <p className="line-clamp-2 text-sm sm:line-clamp-1">{a.text}</p>
                   <p className="truncate text-xs text-muted">{a.analysis} · tunnel {a.tunnel} · {a.check_id}</p>
                 </div>
                 <ArrowRight className="size-4 text-muted" aria-hidden />
@@ -99,18 +99,18 @@ export function Overview() {
       <Card className="mt-4">
         <CardHeader><div><CardTitle>Tunnel inventory</CardTitle><CardDescription>Every tunnel of the recent analyses</CardDescription></div></CardHeader>
         <Table>
-          <thead><tr><Th>Analysis</Th><Th>Tunnel</Th><Th>Endpoints</Th><Th>Handshake</Th><Th>ESP suite</Th><Th>Mode</Th><Th>IKE</Th><Th className="text-right">ESP packets</Th><Th>Risk</Th></tr></thead>
+          <thead><tr><Th>Analysis</Th><Th>Tunnel</Th><Th className="hidden sm:table-cell">Endpoints</Th><Th className="hidden sm:table-cell">Handshake</Th><Th>ESP suite</Th><Th className="hidden md:table-cell">Mode</Th><Th className="hidden md:table-cell">IKE</Th><Th className="hidden md:table-cell text-right">ESP packets</Th><Th>Risk</Th></tr></thead>
           <tbody>
             {d.inventory.map((t) => (
               <Tr key={`${t.analysis_id}-${t.idx}`} className="cursor-pointer" onClick={() => nav(`/analyses/${t.analysis_id}/tunnels/${t.idx}`)}>
-                <Td className="max-w-[220px] truncate"><Link className="hover:underline" to={`/analyses/${t.analysis_id}`} onClick={(e) => e.stopPropagation()}>{t.analysis}</Link><div className="text-xs text-muted">{when(t.created_at)}</div></Td>
+                <Td className="max-w-[220px] truncate"><Link className="hover:underline" to={`/analyses/${t.analysis_id}`} onClick={(e) => e.stopPropagation()}>{t.analysis}</Link><div className="text-xs text-muted">{when(t.created_at)}</div><div className="num truncate text-xs text-text-2 sm:hidden">{t.initiator ?? '?'} → {t.responder.join(', ') || '?'}</div></Td>
                 <Td className="num">#{t.idx}</Td>
-                <Td className="num text-xs">{t.initiator ?? '?'} → {t.responder.join(', ') || '?'}</Td>
-                <Td><StatusBadge status={t.handshake_status} /></Td>
+                <Td className="hidden sm:table-cell num text-xs">{t.initiator ?? '?'} → {t.responder.join(', ') || '?'}</Td>
+                <Td className="hidden sm:table-cell"><StatusBadge status={t.handshake_status} /></Td>
                 <Td>{t.esp_suite ? <span className="flex items-center gap-2 text-xs">{factValue(t.esp_suite.value)} <ConfidenceBadge value={t.esp_suite.confidence} /></span> : <span className="text-xs text-muted">no ESP</span>}</Td>
-                <Td className="text-xs">{t.mode ? factValue(t.mode.value) : '-'}</Td>
-                <Td className="text-xs">{t.ike_version ? `IKEv${t.ike_version.value}` : <span className="text-muted">not captured</span>}</Td>
-                <Td className="num text-right">{num(t.esp_packets)}</Td>
+                <Td className="hidden md:table-cell text-xs">{t.mode ? factValue(t.mode.value) : '-'}</Td>
+                <Td className="hidden md:table-cell text-xs">{t.ike_version ? `IKEv${t.ike_version.value}` : <span className="text-muted">not captured</span>}</Td>
+                <Td className="hidden md:table-cell num text-right">{num(t.esp_packets)}</Td>
                 <Td>{t.risk ? <BandBadge band={t.risk.band} score={t.risk.score} /> : '-'}</Td>
               </Tr>
             ))}
@@ -124,8 +124,8 @@ export function Overview() {
           <tbody>
             {d.recent.map((a) => (
               <Tr key={a.id} className="cursor-pointer" onClick={() => nav(`/analyses/${a.id}`)}>
-                <Td className="max-w-[320px] truncate">{a.name}</Td>
-                <Td><span className="text-xs text-muted capitalize">{a.source}</span></Td>
+                <Td className="max-w-[150px] truncate sm:max-w-[320px]">{a.name}</Td>
+                <Td className="hidden sm:table-cell"><span className="text-xs text-muted capitalize">{a.source}</span></Td>
                 <Td><StatusBadge status={a.status} /></Td>
                 <Td>{a.risk != null ? <BandBadge band={a.risk_band} score={a.risk} /> : '-'}</Td>
                 <Td className="text-right text-xs text-muted">{when(a.created_at)}</Td>
