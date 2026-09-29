@@ -306,7 +306,7 @@ def overview(session: str | None = None, s: Session = Depends(db.dep)):
     alerts.sort(key=lambda x: sev_order[x["severity"]])
     worst = max((a.risk or 0 for a in done), default=None) if done else None
     return {"recent": [summary(a) for a in recent], "inventory": inventory[:60], "alerts": alerts[:12],
-            "overall": {"score": worst, "rule": "worst tunnel over the last 20 finished analyses"},
+            "overall": {"score": worst, "rule": "worst tunnel of this run" if session else "worst tunnel over the last 20 finished analyses"},
             "analyses_done": len(done)}
 
 

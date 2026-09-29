@@ -16,6 +16,7 @@ const ReportsPage = lazy(() => import('@/pages/Reports').then((m) => ({ default:
 const ExecutiveReport = lazy(() => import('@/pages/Reports').then((m) => ({ default: m.ExecutiveReport })))
 const TechnicalReport = lazy(() => import('@/pages/Reports').then((m) => ({ default: m.TechnicalReport })))
 const LivePage = lazy(() => import('@/pages/Live').then((m) => ({ default: m.LivePage })))
+const LiveSessionPage = lazy(() => import('@/pages/LiveSession').then((m) => ({ default: m.LiveSessionPage })))
 
 function NotFound() {
   return <Card><EmptyState title="Page not found">Check the address, or go back to the overview.</EmptyState></Card>
@@ -38,6 +39,7 @@ export default function App() {
         <Route path="replay" element={<ReplayPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="live" element={<LivePage />} />
+        <Route path="live/:id" element={<LiveSessionPage />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

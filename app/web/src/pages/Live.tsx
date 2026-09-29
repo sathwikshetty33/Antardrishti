@@ -77,11 +77,11 @@ function SessionRow({ s }: { s: LiveSession }) {
     }
   }
   return (
-    <Tr className="cursor-pointer" onClick={() => nav(`/analyses/${s.id}`)}>
+    <Tr className="cursor-pointer" onClick={() => nav(`/live/${s.id}`)}>
       <Td className="max-w-[360px]">
-        <div className="truncate">{s.name || 'Live session'}</div>
+        <Link to={`/live/${s.id}`} className="block truncate hover:underline" onClick={(e) => e.stopPropagation()}>{s.name || 'Live session'}</Link>
         <div className="text-xs text-muted">
-          {demo ? demoLabel : mine ? 'your sensor' : 'sensor'} · {when(s.created_at)}
+          {demo ? 'recorded traffic' : mine ? 'your sensor' : 'sensor'} · {when(s.created_at)}
           {run?.running ? <span className="num"> · slice {run.seq} of {run.steps ?? '…'}</span> : null}
         </div>
       </Td>
@@ -135,6 +135,7 @@ function NewSession({ mode, onClose }: { mode: Mode | null; onClose: () => void 
       if (mode === 'demo') {
         startDemoSensor(s.id, demo, 0)
         close()
+        nav(`/live/${s.id}`)
       } else {
         setCreated({ id: s.id, key: s.key })
       }
