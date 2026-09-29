@@ -74,7 +74,15 @@ def main():
         pg.screenshot(path=str(out / "overview-mobile.png"), full_page=False)
         ctx.close()
         b.close()
+    tops()
     print("console errors:", errors or "none")
+
+
+def tops():
+    """the first 1440 x 900 screen of the full-page shots the README shows side by side"""
+    from PIL import Image
+    for name in ("overview-dark", "replay-dark", "report-executive", "report-technical"):
+        Image.open(out / f"{name}.png").crop((0, 0, 1440, 900)).save(out / f"{name}-top.png", optimize=True)
 
 
 if __name__ == "__main__":

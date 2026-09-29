@@ -93,16 +93,46 @@ On the live deployment, the 88-second mixture demo (103,587 ESP packets) is anal
 
 ## Screenshots
 
-| | |
-|---|---|
-| ![Overview](app/docs/screenshots/overview-dark.png) | ![Tunnel detail](app/docs/screenshots/tunnel-dark.png) |
-| **Overview:** tunnel inventory, overall risk, alerts | **Tunnel detail:** facts with confidence and source, bandwidth and active-time shares, window timeline, findings |
-| ![Threat matrix](app/docs/screenshots/threats-dark.png) | ![Demo replay](app/docs/screenshots/replay-dark.png) |
-| **Threat matrix:** likelihood × impact, drill-down to findings | **Demo replay:** confidence rising as 5-second chunks arrive |
-| ![Upload](app/docs/screenshots/upload-light.png) | ![Technical report](app/docs/screenshots/report-technical.png) |
-| **Analyze capture** (light theme): direct-to-storage upload, polled progress, demos | **Technical report:** every fact, finding, standard and error bar ([PDF](app/docs/screenshots/report-technical.pdf)) |
+<p align="center">
+  <a href="app/docs/screenshots/tunnel-dark.png"><img src="app/docs/screenshots/tunnel-1920.png" alt="Tunnel detail page: handshake and ESP facts with confidence and source, bandwidth share with error bars, active time"></a><br>
+  <b>Tunnel detail:</b> facts with confidence and source, bandwidth share with error bars, active time, window timeline, findings
+</p>
 
-All screenshots: [app/docs/screenshots](app/docs/screenshots) (dark and light themes, 1920 px, mobile).
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="app/docs/screenshots/overview-dark.png"><img src="app/docs/screenshots/overview-dark-top.png" alt="Overview page"></a><br>
+      <b>Overview:</b> tunnel inventory, overall risk, alerts
+    </td>
+    <td width="50%" valign="top">
+      <a href="app/docs/screenshots/threats-dark.png"><img src="app/docs/screenshots/threats-dark.png" alt="Threat matrix page"></a><br>
+      <b>Threat matrix:</b> likelihood × impact, drill-down to findings
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <a href="app/docs/screenshots/replay-dark.png"><img src="app/docs/screenshots/replay-dark-top.png" alt="Demo replay page"></a><br>
+      <b>Demo replay:</b> confidence rising as 5-second chunks arrive
+    </td>
+    <td valign="top">
+      <a href="app/docs/screenshots/upload-light.png"><img src="app/docs/screenshots/upload-light.png" alt="Analyze capture page in the light theme"></a><br>
+      <b>Analyze capture</b> (light theme): direct-to-storage upload, polled progress, demos
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <a href="app/docs/screenshots/report-executive.pdf"><img src="app/docs/screenshots/report-executive-top.png" alt="Executive report"></a><br>
+      <b>Executive report:</b> risk, top findings, traffic overview, recommendations (<a href="app/docs/screenshots/report-executive.pdf">PDF</a>)
+    </td>
+    <td valign="top">
+      <a href="app/docs/screenshots/report-technical.pdf"><img src="app/docs/screenshots/report-technical-top.png" alt="Technical report"></a><br>
+      <b>Technical report:</b> every fact, finding, standard and error bar (<a href="app/docs/screenshots/report-technical.pdf">PDF</a>)
+    </td>
+  </tr>
+</table>
+
+Each picture links to its full page. All screenshots, in both themes and on a phone:
+[app/docs/screenshots](app/docs/screenshots), retaken with `python app/docs/screenshots.py`.
 
 ## How it works
 
@@ -236,13 +266,13 @@ host_a (10.1.0.0/24) ── gw_a ══ [ router / tap ] ══ gw_b ── host
 
 ### Tiers
 
-| tier | runs | what | ESP packets | size |
+| tier | runs | what | ESP&nbsp;packets | size |
 |---|---|---|---|---|
-| **P0** | 370 | 192 traffic runs (32 tunnels × 6 apps), 64 short tunnels, 60 handshake, 54 edge | 11.8 M | 1.34 GB |
-| **P1** | 192 | 48 anchor runs, 80 mixtures (10 app combinations × 8 configs), 32 live chat, 8 internet realism, 24 edge | 11.7 M | 1.32 GB |
-| **WhatsApp** | 16 | public WhatsApp captures replayed through the tunnels (8 chat, 8 calls) | 0.07 M | 0.10 GB |
-| **p0s** | 192 | P0's traffic runs recaptured one lab per machine, each the paired twin of its P0 run | 16.0 M | 1.84 GB |
-| **total** | **770** | | **39.6 M** | **4.6 GB** |
+| **P0** | 370 | 192 traffic runs (32 tunnels × 6 apps), 64 short tunnels, 60 handshake, 54 edge | 11.8&nbsp;M | 1.34&nbsp;GB |
+| **P1** | 192 | 48 anchor runs, 80 mixtures (10 app combinations × 8 configs), 32 live chat, 8 internet realism, 24 edge | 11.7&nbsp;M | 1.32&nbsp;GB |
+| **WhatsApp** | 16 | public WhatsApp captures replayed through the tunnels (8 chat, 8 calls) | 0.07&nbsp;M | 0.10&nbsp;GB |
+| **p0s** | 192 | P0's traffic runs recaptured one lab per machine, each the paired twin of its P0 run | 16.0&nbsp;M | 1.84&nbsp;GB |
+| **total** | **770** | | **39.6&nbsp;M** | **4.6&nbsp;GB** |
 
 Splits are deterministic and never cross a tunnel:
 - **Traffic-like stages:** 25% of the tunnels in each tier and stage are test, stratified by
