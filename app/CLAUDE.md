@@ -264,3 +264,8 @@ compose Postgres, uvicorn, Vite).
   at the bundle check: `.vercelignore` had matched `app/api/models/` (fixed: anchored paths).
   The dashboard moved from a rewrite to `app.frontend()`, since rewrites in backend-framework
   projects route to the app.
+  Neon project `antardrishti` (`sparkling-hill-44536745`, `aws-us-east-1`, Postgres 17) created
+  with the Neon MCP server; `DATABASE_URL` (pooled) and `DATABASE_URL_UNPOOLED` (direct) stored as
+  sensitive Vercel variables. Replay chunks are zstd-compressed in Postgres (Neon free plan: 512 MB
+  per branch). Production URL: https://antardrishti-sathwik-shettys-projects.vercel.app (Vercel
+  Authentication on: only members of the Vercel team can open it).

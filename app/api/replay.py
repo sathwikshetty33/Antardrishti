@@ -58,6 +58,14 @@ def chunk(name, k):
     return b"".join(part), len(part), hi
 
 
+def unpack(b):
+    """a stored chunk: zstd frames (magic 28 b5 2f fd) are decompressed, older raw chunks pass"""
+    b = bytes(b)
+    if b[:4] == b"\x28\xb5\x2f\xfd":
+        return zstandard.ZstdDecompressor().decompress(b)
+    return b
+
+
 def append_next(s, a):
     """store the next chunk; -> (path of the capture so far, step) or None when finished"""
     name = a.replay["demo"]
@@ -65,7 +73,9 @@ def append_next(s, a):
     if k >= a.replay["steps"]:
         return None
     data, n, t_end = chunk(name, k)
-    s.add(m.replay_chunk(analysis_id=a.id, idx=k, t_end=t_end, packets=n, data=data))
+    # zstd-compressed in postgres (neon's free plan has 512 mb per branch)
+    s.add(m.replay_chunk(analysis_id=a.id, idx=k, t_end=t_end, packets=n,
+                         data=zstandard.ZstdCompressor(level=6).compress(data)))
     s.commit()
     head, _ = records(name)
     rows = s.query(m.replay_chunk).filter(m.replay_chunk.analysis_id == a.id).order_by(m.replay_chunk.idx).all()
@@ -73,5 +83,5 @@ def append_next(s, a):
     with open(p, "wb") as f:
         f.write(head)
         for r in rows:
-            f.write(r.data)
+            f.write(unpack(r.data))
     return p, k + 1, t_end, sum(r.packets for r in rows)

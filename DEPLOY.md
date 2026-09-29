@@ -25,6 +25,13 @@ repository, an issue or a chat.
 
 ## 2. Add Neon Postgres
 
+> **Done for this repository (2026-09-29):** the Neon project `antardrishti`
+> (`sparkling-hill-44536745`, org "Sathwik Suresh", `aws-us-east-1`, Postgres 17) was created
+> with the Neon MCP server, and its pooled and direct strings were stored in the Vercel project
+> as the *sensitive* variables `DATABASE_URL` and `DATABASE_URL_UNPOOLED`: the same names the
+> Marketplace integration sets. The Marketplace route below is the alternative for a fresh
+> setup.
+
 1. In the project, open **Storage → Create Database → Neon** (Marketplace) on the free plan.
    Connect it to Production, Preview and Development.
 2. Neon adds `DATABASE_URL` (pooled, PgBouncer: the app uses this) and `DATABASE_URL_UNPOOLED`
