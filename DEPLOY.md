@@ -95,7 +95,13 @@ Neon dashboard.
 | function bundle | about 143 MB uncompressed (127 MB of dependencies: numpy, zstandard, fastapi, pydantic, sqlalchemy, psycopg; 16 MB of sources, including the 6 MB model bundle and 10.5 MB of demo captures). The Python limit is 500 MB |
 | largest capture | **300 MB uncompressed pcap** (`MAX_PCAP_MB`). Its worst case, 2.2 M records of LAN bulk traffic, took 13.4 s on one core with 686 MB peak memory under a 2 GB address-space cap (`app/tests/test_timing.py`). At an assumed 3x slower Vercel vCPU, about 40 s of the 300 s limit |
 | upload | 100 MB per file (`UPLOAD_LIMIT_MB`), straight from the browser to Blob. Vercel's 4.5 MB body limit only applies to API requests, which never carry the capture |
-| `/tmp` | a compressed upload and its decompressed pcap briefly coexist: up to 100 + 300 MB. Vercel doesn't document the `/tmp` size; Lambda's 512 MB default is assumed |
+| `/tmp` | **525 MB** on the live function (513 MB free, read from `/api/health`). Files are fetched and decompressed one at a time, so `/tmp` holds at most the captures so far (300 MB) plus one upload (100 MB) |
+
+Measured on the live deployment (2026-09-29): the 88 s mixture demo analysed in 2.7 s on the
+Vercel function (3.4 s for the whole request); a 10 MB capture went from the browser to the
+private Blob store, was fetched back by the function in 0.3 s and analysed in 3.1 s. On this
+workload the Vercel vCPU was faster than the local core, so the 3x slowdown assumed for the
+300 MB limit is a wide margin.
 
 A larger capture is rejected with a clear message before parsing. Split it (`editcap -c`)
 or analyse it locally with `python -m analyzer.cli analyze <pcap> --out result.json`.

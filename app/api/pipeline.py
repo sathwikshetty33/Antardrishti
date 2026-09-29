@@ -80,7 +80,11 @@ def run(s, a, inputs):
         set_state(s, a, status="running", stage="fetching", progress=0.02)
         paths = []
         up_limit = int(settings.upload_limit_mb * 2 ** 20)
+        pcap_limit = int(settings.max_pcap_mb * 2 ** 20)
         total = 0
+        raw = 0
+        # one file at a time: download, decompress, drop the compressed copy, so /tmp (about 512 mb
+        # on vercel) holds at most the captures so far plus one upload
         for i, (src, name) in enumerate(inputs):
             dest = tmp / f"{i}-{storage.safe_name(name)}"
             if isinstance(src, Path):
@@ -88,13 +92,12 @@ def run(s, a, inputs):
                 total += dest.stat().st_size
             else:
                 total += storage.fetch(src, dest, up_limit)
-            paths.append(dest)
+            q = unpack(dest, pcap_limit - raw)
+            raw += q.stat().st_size
+            if raw > pcap_limit:
+                raise storage.too_large(limit_error(raw / 2 ** 20))
+            paths.append(q)
         timings["fetch_s"] = round(time.time() - t0, 3)
-        pcap_limit = int(settings.max_pcap_mb * 2 ** 20)
-        paths = [unpack(p, pcap_limit) for p in paths]
-        raw = sum(p.stat().st_size for p in paths)
-        if raw > pcap_limit:
-            raise storage.too_large(limit_error(raw / 2 ** 20))
         a.size_bytes = int(total)
         t1 = time.time()
         last = [0.0]
