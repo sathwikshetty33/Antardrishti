@@ -51,3 +51,11 @@ export async function stopSession(id: string) {
   if (!k) throw new Error('this browser does not hold the sensor key for this session')
   return api.liveStop(id, k.key)
 }
+
+// the commands a sensor machine runs for one session (the agent is served by this deployment)
+export function agentCommands(origin: string, id: string, key: string) {
+  return [
+    `curl -fsSLO ${origin}/agent/antardrishti-agent.py`,
+    `sudo python3 antardrishti-agent.py --api ${origin} --session ${id} --key ${key}`,
+  ].join('\n')
+}

@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Play, PlugZap, RadioTower, Square } from 'lucide-react'
+import { AlertTriangle, Play, PlugZap, RadioTower, Square } from 'lucide-react'
 import { useState, type FormEvent, type MouseEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/AppShell'
 import { BandBadge, LiveBadge } from '@/components/badges'
+import { CodeBlock } from '@/components/Code'
 import { toast } from '@/lib/toast'
 import { CardSkeleton, EmptyState, ErrorState } from '@/components/states'
 import { Button } from '@/components/ui/button'
@@ -17,7 +18,7 @@ import { demoLabel, demoRun, isDemoSession, startDemoSensor, stopDemoSensor } fr
 import { num, when } from '@/lib/format'
 import { setSelectedRun } from '@/lib/run'
 import { cn } from '@/lib/utils'
-import { keepSensor, keptSensor, stopSession, useSensors } from '@/lib/sensors'
+import { agentCommands, keepSensor, keptSensor, stopSession, useSensors } from '@/lib/sensors'
 
 type Mode = 'demo' | 'agent'
 
@@ -110,9 +111,12 @@ function NewSession({ mode, onClose }: { mode: Mode | null; onClose: () => void 
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [created, setCreated] = useState<{ id: string; key: string } | null>(null)
+  const nav = useNavigate()
   const close = () => {
     setName('')
     setError(null)
+    setCreated(null)
     onClose()
   }
   const create = async (e: FormEvent) => {
@@ -127,9 +131,13 @@ function NewSession({ mode, onClose }: { mode: Mode | null; onClose: () => void 
       const s = await api.liveCreate(label)
       keepSensor(s.id, { key: s.key, kind: mode, demo: mode === 'demo' ? demo : undefined, created: Date.now() })
       setSelectedRun(s.id)
-      if (mode === 'demo') startDemoSensor(s.id, demo, 0)
       await qc.invalidateQueries({ queryKey: ['live-sessions'] })
-      close()
+      if (mode === 'demo') {
+        startDemoSensor(s.id, demo, 0)
+        close()
+      } else {
+        setCreated({ id: s.id, key: s.key })
+      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) window.dispatchEvent(new Event('antar-need-key'))
       setError(err instanceof Error ? err.message : String(err))
@@ -138,38 +146,72 @@ function NewSession({ mode, onClose }: { mode: Mode | null; onClose: () => void 
     }
   }
   return (
-    <Modal open={mode !== null} onOpenChange={(o) => { if (!o) close() }}
-      title={mode === 'demo' ? 'Start the demo sensor' : 'Connect a sensor'}>
-      <form className="space-y-4" onSubmit={create}>
-        <label className="block space-y-1.5 text-xs text-text-2">
-          <span>Session name (optional)</span>
-          <Input value={name} maxLength={120} onChange={(e) => setName(e.target.value)} autoFocus
-            placeholder={mode === 'demo' ? 'for example: lab walkthrough' : 'for example: branch office gateway'} />
-        </label>
-        {mode === 'demo' ? (
-          <fieldset className="space-y-2">
-            <legend className="mb-1.5 text-xs text-text-2">Recorded capture to feed, 5 seconds every 5 seconds</legend>
-            {demos.isLoading ? <Skeleton className="h-14" /> : demos.data?.map((d) => (
-              <button key={d.name} type="button" onClick={() => setDemo(d.name)} aria-pressed={demo === d.name}
-                className={cn('w-full cursor-pointer rounded-lg border p-3 text-left transition-colors',
-                  demo === d.name ? 'border-accent bg-accent-soft' : 'border-border hover:bg-surface-2')}>
-                <p className="text-sm font-medium">{d.title}</p>
-                <p className="num mt-0.5 text-[11px] text-muted">{d.steps} slices of 5 s · {num(d.packets)} packets</p>
-              </button>
-            ))}
-            <p className="text-[11px] text-muted">
-              Labelled "{demoLabel}": the slices go through the same path as a real sensor's chunks, with the capture's own timestamps.
-            </p>
-          </fieldset>
-        ) : null}
-        {error ? <p role="alert" className="text-xs" style={{ color: 'var(--critical)' }}>{error}</p> : null}
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={close}>Cancel</Button>
-          <Button type="submit" variant="primary" disabled={busy}>
-            {mode === 'demo' ? <><Play /> Start</> : <><PlugZap /> Create session</>}
-          </Button>
-        </div>
-      </form>
+    <Modal open={mode !== null} onOpenChange={(o) => { if (!o) close() }} wide={!!created}
+      title={created ? 'Connect your sensor to this session' : mode === 'demo' ? 'Start the demo sensor' : 'Connect a sensor'}>
+      {created ? (
+        <ConnectPanel id={created.id} sensorKey={created.key} onLeave={close}
+          onOpen={() => { const id = created.id; close(); nav(`/live/${id}`) }} />
+      ) : (
+        <form className="space-y-4" onSubmit={create}>
+          <label className="block space-y-1.5 text-xs text-text-2">
+            <span>Session name (optional)</span>
+            <Input value={name} maxLength={120} onChange={(e) => setName(e.target.value)} autoFocus
+              placeholder={mode === 'demo' ? 'for example: lab walkthrough' : 'for example: branch office gateway'} />
+          </label>
+          {mode === 'demo' ? (
+            <fieldset className="space-y-2">
+              <legend className="mb-1.5 text-xs text-text-2">Recorded capture to feed, 5 seconds every 5 seconds</legend>
+              {demos.isLoading ? <Skeleton className="h-14" /> : demos.data?.map((d) => (
+                <button key={d.name} type="button" onClick={() => setDemo(d.name)} aria-pressed={demo === d.name}
+                  className={cn('w-full cursor-pointer rounded-lg border p-3 text-left transition-colors',
+                    demo === d.name ? 'border-accent bg-accent-soft' : 'border-border hover:bg-surface-2')}>
+                  <p className="text-sm font-medium">{d.title}</p>
+                  <p className="num mt-0.5 text-[11px] text-muted">{d.steps} slices of 5 s · {num(d.packets)} packets</p>
+                </button>
+              ))}
+              <p className="text-[11px] text-muted">
+                Labelled "{demoLabel}": the slices go through the same path as a real sensor's chunks, with the capture's own timestamps.
+              </p>
+            </fieldset>
+          ) : null}
+          {error ? <p role="alert" className="text-xs" style={{ color: 'var(--critical)' }}>{error}</p> : null}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={close}>Cancel</Button>
+            <Button type="submit" variant="primary" disabled={busy}>
+              {mode === 'demo' ? <><Play /> Start</> : <><PlugZap /> Create session</>}
+            </Button>
+          </div>
+        </form>
+      )}
     </Modal>
+  )
+}
+
+// shown once, right after "Connect a sensor" creates the session: the server keeps only a hash
+// of the key, so this is the one time anyone sees it (this browser keeps a copy to stop it)
+function ConnectPanel({ id, sensorKey, onOpen, onLeave }: { id: string; sensorKey: string; onOpen: () => void; onLeave: () => void }) {
+  const origin = window.location.origin
+  return (
+    <div className="space-y-4">
+      <div role="alert" className="flex gap-3 rounded-[12px] border px-4 py-3 text-sm"
+        style={{ borderColor: 'color-mix(in oklab, var(--medium) 45%, transparent)', background: 'color-mix(in oklab, var(--medium) 10%, transparent)' }}>
+        <AlertTriangle className="mt-0.5 size-4 shrink-0" style={{ color: 'var(--medium)' }} aria-hidden />
+        <span>
+          <strong className="font-semibold">Copy the sensor key now: it is shown only once.</strong>{' '}
+          <span className="text-text-2">It lets a sensor feed this session and nothing else. The server keeps only a hash of it; this browser keeps a copy so it can stop the session.</span>
+        </span>
+      </div>
+      <CodeBlock label="sensor key" code={sensorKey} />
+      <CodeBlock label="session link" code={`${origin}/live/${id}`} />
+      <CodeBlock label="on the sensor machine: download the agent, then run it as root" code={agentCommands(origin, id, sensorKey)} />
+      <p className="text-xs text-text-2">
+        The agent needs Python 3.8+ and tcpdump (Linux or macOS; Windows through WSL2). It captures on the default-route
+        interface; add <span className="num">--iface</span> to pick another (<span className="num">--list-ifaces</span> lists them).
+        Step by step, test traffic and troubleshooting: <Link to="/docs/live-sensor" className="text-accent hover:underline" onClick={onLeave}>the sensor docs</Link>.
+      </p>
+      <div className="flex justify-end">
+        <Button variant="primary" onClick={onOpen}><RadioTower /> Open the live view</Button>
+      </div>
+    </div>
   )
 }
