@@ -55,8 +55,9 @@ def effective_status(sess, t=None):
     t = t if t is not None else time.time()
     if sess.status in ("stopped", "completed"):
         return sess.status
+    # 20 minutes without a chunk, counted from the last chunk or, before the first, from creation
     last = (sess.last_chunk_at or sess.created_at).timestamp()
-    if sess.status == "live" and t - last > settings.live_idle_timeout_s:
+    if sess.status in ("waiting", "live") and t - last > settings.live_idle_timeout_s:
         return "expired"
     return sess.status
 

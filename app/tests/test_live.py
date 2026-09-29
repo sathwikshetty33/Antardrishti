@@ -215,6 +215,10 @@ def test_limits_and_expiry(mixture_parts, monkeypatch):
 
     from app.api import live
     with db.session() as s:
+        # a session that never receives a chunk expires too, 20 minutes after it was created
+        waiting = s.get(m.live_session, b["id"])
+        assert live.effective_status(waiting, t=time.time() + settings.live_idle_timeout_s + 1) == "expired"
+    with db.session() as s:
         sess = s.get(m.live_session, b["id"])
         sess.status = "live"
         sess.last_chunk_at = m.now() - timedelta(seconds=10)  # recent enough not to trip the rate limit below
@@ -240,6 +244,31 @@ def test_completes_on_size_or_duration_cap(mixture_parts, monkeypatch):
     b = create_session()
     r = post_chunk(b["id"], b["key"], 0, header, esp[0], ike[0])
     assert r.json()["status"] == "completed" and "minute cap" in r.json()["note"]
+
+
+def test_demo_sensor_slices(monkeypatch):
+    monkeypatch.setattr(settings, "live_min_chunk_interval_s", 0.0)
+    a = create_session("demo sensor")
+    url = f"/api/live/{a['id']}/demo-next"
+    body = {"demo": "ikev1-aggressive", "seq": 0}
+    assert c.post(url, json=body, headers={"x-sensor-key": "not-the-key"}).status_code == 403
+    first = c.post(url, json=body, headers={"x-sensor-key": a["key"]})
+    assert first.status_code == 200, first.text
+    assert first.json()["packets_in_chunk"] > 0 and first.json()["status"] == "live"
+    # the handshake is in the first 5 s slice: its alert is there before any later slice
+    assert any(f["check_id"] == "IKEV1-AGGR" for f in c.get(f"/api/live/{a['id']}/alerts").json())
+    steps = first.json()["demo"]["steps"]
+    last = first
+    for seq in range(1, steps):
+        last = c.post(url, json={"demo": "ikev1-aggressive", "seq": seq}, headers={"x-sensor-key": a["key"]})
+        assert last.status_code == 200, last.text
+    assert last.json()["status"] == "completed" and "demo capture ended" in last.json()["note"]
+    assert last.json()["chunks"] == steps
+    after = c.post(url, json={"demo": "ikev1-aggressive", "seq": steps}, headers={"x-sensor-key": a["key"]})
+    assert after.status_code == 410
+    b = create_session()
+    unknown = c.post(f"/api/live/{b['id']}/demo-next", json={"demo": "nope", "seq": 0}, headers={"x-sensor-key": b["key"]})
+    assert unknown.status_code == 404
 
 
 def test_overview_scoped_to_one_session(mixture_parts):

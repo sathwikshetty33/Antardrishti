@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import and_, or_, text
 from sqlalchemy.orm import Session
 
 from app.api import db, live, pipeline, replay, settings, storage
@@ -282,12 +282,14 @@ def report(aid: str, s: Session = Depends(db.dep)):
 def overview(session: str | None = None, s: Session = Depends(db.dep)):
     """recent analyses, the latest finished analyses' tunnels and risk, and critical alerts.
     ?session={id} scopes all of this to one live session or uploaded analysis instead."""
+    # a live run is "running" while each chunk is analysed: it keeps showing its last finished analysis
+    finished = or_(m.analysis.status == "done", and_(m.analysis.source == "live", m.analysis.finished_at.isnot(None)))
     if session:
         recent = [a for a in [s.get(m.analysis, session)] if a is not None]
-        done = [a for a in recent if a.status == "done"]
+        done = [a for a in recent if a.status == "done" or (a.source == "live" and a.finished_at)]
     else:
         recent = s.query(m.analysis).order_by(m.analysis.created_at.desc()).limit(8).all()
-        done = s.query(m.analysis).filter(m.analysis.status == "done").order_by(m.analysis.created_at.desc()).limit(20).all()
+        done = s.query(m.analysis).filter(finished).order_by(m.analysis.created_at.desc()).limit(20).all()
     inventory, alerts = [], []
     for a in done:
         risks = risks_of(s, a.id)
@@ -396,7 +398,7 @@ def live_create(req: live_start, request: Request, s: Session = Depends(db.dep))
     key = live.new_key()
     s.add(m.analysis(id=aid, source="live", name=(req.name or "Live session")[:200], status="running",
                      stage="waiting", progress=0.0))
-    s.add(m.live_session(analysis_id=aid, name=req.name or "", key_hash=live.key_hash(key), creator_ip=ip))
+    s.add(m.live_session(analysis_id=aid, name=(req.name or "")[:200], key_hash=live.key_hash(key), creator_ip=ip))
     s.commit()
     return {**live_summary(s, get_live(s, aid)), "key": key}
 
@@ -418,12 +420,10 @@ def live_alerts(sid: str, s: Session = Depends(db.dep)):
     return [f for f in findings_of(s, sid) if f["verdict"] == "fail" and f["severity"] in ("critical", "high")]
 
 
-@app.post("/api/live/{sid}/chunks")
-async def live_chunks(sid: str, seq: int = Form(...), esp: UploadFile = File(...),
-                      ike: UploadFile | None = File(None), x_sensor_key: str | None = Header(None),
-                      s: Session = Depends(db.dep)):
+def live_gate(s, sid, key, seq):
+    """the checks every chunk passes before it is read: sensor key, status, order and rate"""
     sess = get_live(s, sid)
-    if not live.check_key(sess, x_sensor_key):
+    if not live.check_key(sess, key):
         raise HTTPException(403, "missing or wrong sensor key (x-sensor-key)")
     eff = live.refresh_status(s, sess)
     if eff in ("stopped", "expired", "completed"):
@@ -432,16 +432,17 @@ async def live_chunks(sid: str, seq: int = Form(...), esp: UploadFile = File(...
         raise HTTPException(409, f"out of order: expected seq {sess.last_seq + 1}")
     if sess.last_chunk_at and (m.now() - sess.last_chunk_at).total_seconds() < settings.live_min_chunk_interval_s:
         raise HTTPException(429, "at most 1 chunk per second per session")
-    esp_wire = await esp.read()
-    ike_wire = await ike.read() if ike is not None else None
-    total = len(esp_wire) + (len(ike_wire) if ike_wire else 0)
-    if total > settings.live_max_chunk_mb * 2 ** 20:
-        raise HTTPException(413, f"the chunk is over the {settings.live_max_chunk_mb:.0f} MB limit")
+    return sess
+
+
+def live_ingest(s, sess, seq, esp_raw, ike_raw):
+    """store one chunk, reanalyse the capture so far and settle the caps: the one path for agent
+    chunks and demo-sensor slices alike. -> (analysis row, packets in the chunk)"""
     try:
-        n = live.store_chunk(s, sess, seq, gunzip(esp_wire), gunzip(ike_wire) if ike_wire else None)
+        n = live.store_chunk(s, sess, seq, esp_raw, ike_raw)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    a = s.get(m.analysis, sid)
+    a = s.get(m.analysis, sess.analysis_id)
     esp_path, ike_path = live.rebuild(s, sess)
     try:
         esp_size = esp_path.stat().st_size
@@ -455,7 +456,48 @@ async def live_chunks(sid: str, seq: int = Form(...), esp: UploadFile = File(...
     if note:
         sess.status, sess.note = "completed", note
         s.commit()
+    return a, n
+
+
+@app.post("/api/live/{sid}/chunks")
+async def live_chunks(sid: str, seq: int = Form(...), esp: UploadFile = File(...),
+                      ike: UploadFile | None = File(None), x_sensor_key: str | None = Header(None),
+                      s: Session = Depends(db.dep)):
+    sess = live_gate(s, sid, x_sensor_key, seq)
+    esp_wire = await esp.read()
+    ike_wire = await ike.read() if ike is not None else None
+    total = len(esp_wire) + (len(ike_wire) if ike_wire else 0)
+    if total > settings.live_max_chunk_mb * 2 ** 20:
+        raise HTTPException(413, f"the chunk is over the {settings.live_max_chunk_mb:.0f} MB limit")
+    a, n = live_ingest(s, sess, seq, gunzip(esp_wire), gunzip(ike_wire) if ike_wire else None)
     return {**live_summary(s, sess), "packets_in_chunk": n, "analysis": summary(a)}
+
+
+class demo_step(BaseModel):
+    demo: str
+    seq: int
+
+
+@app.post("/api/live/{sid}/demo-next")
+def live_demo_next(sid: str, req: demo_step, x_sensor_key: str | None = Header(None), s: Session = Depends(db.dep)):
+    """the demo sensor: slice number seq (5 s, the replay chunking) of a stored demo capture,
+    ingested exactly like an agent chunk. the last slice completes the session."""
+    sess = live_gate(s, sid, x_sensor_key, req.seq)
+    try:
+        d = replay.demo(req.demo)
+    except KeyError:
+        raise HTTPException(404, "no such demo")
+    steps = replay.steps(d["name"])
+    if req.seq >= steps:
+        raise HTTPException(410, f"the {d['title']} demo capture has only {steps} slices")
+    head, _ = replay.records(d["name"])
+    data, _, _ = replay.chunk(d["name"], req.seq)
+    a, n = live_ingest(s, sess, req.seq, head + data, None)
+    if req.seq + 1 >= steps and sess.status != "completed":
+        sess.status, sess.note = "completed", f"the recorded demo capture ended ({steps} slices of 5 s)"
+        s.commit()
+    return {**live_summary(s, sess), "packets_in_chunk": n, "analysis": summary(a),
+            "demo": {"name": d["name"], "step": req.seq + 1, "steps": steps}}
 
 
 @app.post("/api/live/{sid}/stop")
