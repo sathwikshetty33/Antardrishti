@@ -206,6 +206,49 @@ The largest capture that fits: measured by `app/tests/test_timing.py` on the lar
 capture, with the time scaled for Vercel's single vCPU and peak memory measured. Recorded
 in section 12 and in `DEPLOY.md`.
 
+**Live sessions** (`app/api/live.py`) reanalyse the whole capture so far on every chunk, the
+same way demo replay does, so a chunk's processing time grows with the session, not with the
+chunk. Measured on 2026-09-29 (local machine, in-process `TestClient` against Docker Postgres,
+so analyzer, rules and database time without the network): one session fed the mixture
+demo's ESP records looped, in chunks of 5,000 packets (0.69 MB, about 2 s of that traffic),
+back to back as fast as each was processed, with the size cap lifted so that the 20-minute
+cap ended it:
+
+| into the session | ESP capture so far | processing per chunk (median, range) |
+|---|---|---|
+| 1 minute | 16-31 MB | 2.6 s (1.8-3.3 s) |
+| 10 minutes | 94-99 MB | 7.7 s (7.3-8.6 s) |
+| 20 minutes | 139-141 MB | 10.9 s (10.7-11.0 s) |
+
+204 chunks in all; the session then completed on its own ("reached the 20-minute cap on a live
+session"). The cost is about 0.08 s per accumulated MB, linear, as expected for a full reparse
+and rerun of every model on each chunk. With the default size cap this feed completes at
+chunk 145 (100 MB, 10.9 minutes in, 8.1 s per chunk). So a live session completes at 20
+minutes or 100 MB of accumulated ESP pcap, whichever comes first (`LIVE_MAX_DURATION_S`,
+`LIVE_MAX_ESP_MB`; status `completed` with the reason, which the agent prints before it
+exits). The binding limit is not Vercel's 300 s: past about 60 MB a chunk takes longer to
+analyse than the 5 s the agent spends capturing it, so the sensor falls further behind with
+every chunk. Scaled by the 3x slower vCPU assumed in step 6, a chunk at the size cap takes
+about 25 s on Vercel, still well inside the function limit.
+
+**Future work: incremental analysis.** Instead of reprocessing the whole capture on every
+chunk, persist each tunnel's parser state (reassembly buffers, SPI pairing, the running
+config-evidence accumulators) and its finished 2 s windows, and process only the new chunk
+plus the carried-over trailing partial window. A chunk's processing time would then stay
+roughly constant instead of growing with the session, which removes the reason for the
+current caps (a size cap would still bound `/tmp` and the stored capture). Not done here: it
+needs `analyzer.parse` and `analyzer.features` to expose and accept that state, a larger
+change to their contract than the live-mode brief allows.
+
+**Future work: incremental analysis.** Instead of reprocessing the whole capture on every
+chunk, persist each tunnel's parser state (reassembly buffers, SPI pairing, the running
+config-evidence accumulators) and its finished 2 s windows, and process only the new chunk
+plus the carried-over trailing partial window. That would make a chunk's processing time
+roughly constant instead of growing with the session, removing the reason for the current
+caps (though a size cap would likely still make sense, to bound `/tmp` and the stored
+capture). Not done here: it needs `analyzer.parse` and `analyzer.features` to expose and
+accept that state, which changes their contract more than this brief allows.
+
 ## 10. Deployment
 
 `vercel.json` (build, function config, rewrites), `pyproject.toml` (runtime dependencies,
