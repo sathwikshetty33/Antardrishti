@@ -30,8 +30,8 @@ Then open http://localhost:5173:
 - **Demo replay:** replays a demo in 5 s chunks and shows the confidence rising.
 - **Reports:** executive and technical reports; print them to PDF from the browser.
 
-The API documentation is at http://localhost:8000/api/docs. To serve the built dashboard
-the way Vercel does, run `cd app/web && npm run build`; the output goes into `public/`.
+The API documentation is at http://localhost:8000/api/docs. After `cd app/web && npm run build`,
+uvicorn also serves the built dashboard at http://localhost:8000, the way Vercel does.
 
 ## Tests
 

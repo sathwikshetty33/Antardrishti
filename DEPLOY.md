@@ -2,7 +2,8 @@
 
 The whole platform is one Vercel project built from this repository:
 - a **Python function**: the FastAPI app `app/api/index.py`, named in `pyproject.toml`;
-- a **static React dashboard**: `app/web`, built into `public/` and served from Vercel's CDN;
+- a **static React dashboard**: `app/web`, built into `app/web/dist`, served by the FastAPI app's
+  `app.frontend()` and promoted by Vercel to its CDN;
 - **Neon Postgres** and **Vercel Blob**, both from the Vercel Marketplace.
 
 There are no workers, queues or Redis. An analysis runs inside the request that starts it,
@@ -18,8 +19,8 @@ repository, an issue or a chat.
 2. **Root Directory:** leave it at the repository root (`./`).
 3. **Framework Preset:** Vercel should detect **FastAPI** from `pyproject.toml`. If it doesn't,
    pick FastAPI. Leave the Build, Output and Install settings on their defaults. `vercel.json`
-   sets the build command, which verifies the model bundle and then builds the dashboard into
-   `public/`.
+   sets the build command, which verifies the model bundle, runs the migrations when a database
+   is connected, and builds the dashboard into `app/web/dist`.
 4. Don't deploy yet if the dashboard offers to. The environment comes first.
 
 ## 2. Add Neon Postgres

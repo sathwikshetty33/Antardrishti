@@ -1,14 +1,16 @@
-# local-only files never uploaded by `vercel deploy` from this machine
-.venv/
-features/
-models/
-labels/
-dataset/raw/
-dataset/external/
-dataset/export/
-.local-storage/
-public/
-app/web/node_modules/
+# local-only files never uploaded by `vercel deploy` from this machine (anchored to the root:
+# app/api/models/ must stay)
+/.venv/
+/features/
+/models/
+/labels/
+/dataset/raw/
+/dataset/external/
+/dataset/export/
+/.local-storage/
+/public/
+/app/web/node_modules/
+/app/web/dist/
 **/__pycache__/
-.env
-.env.local
+/.env
+/.env.local

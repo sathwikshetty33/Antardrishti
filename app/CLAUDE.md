@@ -32,7 +32,7 @@ changed; the dataset is not touched.
 | bundle | Python: 500 MB uncompressed (`/docs/functions/runtimes/python`) | runtime dependencies only (numpy, zstandard, fastapi, pydantic, sqlalchemy, psycopg); no lightgbm, scikit-learn, pandas or pyarrow at runtime (section 4); `excludeFiles` drops the dataset, lab and web sources. Measured size in section 12 |
 | WebSockets, background | WebSockets are only a public beta; nothing may run after the response | no WebSockets: progress is stored in Postgres and polled with backoff |
 | disk | no persistent disk; `/tmp` is writable scratch (its size is not stated in the Vercel docs; AWS Lambda's default of 512 MB is assumed) | Postgres on Neon (Vercel Marketplace): `DATABASE_URL` is the pooled PgBouncer string, `DATABASE_URL_UNPOOLED` the direct one (neon.com Vercel-managed integration docs). SQLAlchemy uses `NullPool` (one connection per request, no long-lived pool). Migrations (Alembic) run from the owner's machine or CI against `DATABASE_URL_UNPOOLED`, never at function start. Captures live in Blob and are downloaded to `/tmp` for the request |
-| Python runtime | 3.12 default; FastAPI zero-config preset; `tool.vercel.entrypoint` in `pyproject.toml`; a Build Command in `vercel.json` takes precedence; files in `public/` are served from the CDN | one project rooted at the repository root. `pyproject.toml` sets `entrypoint = "app.api.index:app"`, so the function imports `analyzer/` directly (no copy). The build command builds `app/web` into `public/` and verifies the model bundle. `vercel.json` rewrites deep links to `/index.html` |
+| Python runtime | 3.12 default; FastAPI zero-config preset; `tool.vercel.entrypoint` in `pyproject.toml`; a Build Command in `vercel.json` takes precedence; files in `public/` are served from the CDN | one project rooted at the repository root. `pyproject.toml` sets `entrypoint = "app.api.index:app"`, so the function imports `analyzer/` directly (no copy). The build command verifies the model bundle, runs the migrations when a database is connected, and builds `app/web` into `app/web/dist`, which `app.frontend()` serves (index.html fallback for client routes) and Vercel promotes to the CDN (`tool.vercel.fastapi.static`). Rewrites are not used: in backend-framework projects they route to the app |
 | Blob | client uploads need `BLOB_READ_WRITE_TOKEN` to sign client tokens; private stores are read with `Authorization: Bearer <token>` | the API signs client-upload tokens itself (the `handleUpload` protocol of `@vercel/blob`, reimplemented in Python) and reads private blobs with the token |
 | runtime binaries | no system packages | the inference path is pure Python plus wheels: no tshark, zstd binary or libgomp (section 4) |
 
@@ -259,3 +259,8 @@ compose Postgres, uvicorn, Vite).
   token in both themes, which moved 6 light-theme tokens; timing 1: 300 MB in 13.4 s, 686 MB
   under a 2 GB address-space cap). Frontend: 3 unit tests (rounding, error bars, "likely"),
   `tsc -b`, oxlint and the build clean. Screenshots retaken.
+- **Deployment (2026-09-29).** Vercel project `antardrishti` (Hobby, FastAPI preset) linked to
+  the repository, private Blob store `antardrishti-captures` connected. The first build stopped
+  at the bundle check: `.vercelignore` had matched `app/api/models/` (fixed: anchored paths).
+  The dashboard moved from a rewrite to `app.frontend()`, since rewrites in backend-framework
+  projects route to the app.

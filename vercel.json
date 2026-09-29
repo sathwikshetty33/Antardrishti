@@ -4,15 +4,9 @@
   "functions": {
     "app/api/index.py": {
       "maxDuration": 300,
-      "excludeFiles": "{app/web/**,app/docs/**,app/tests/**,analyzer/tests/**,dataset/**,lab/**,capture/**,gen/**,tools/**,features/**,models/**,public/**,**/node_modules/**,**/__pycache__/**,docker-compose.yml}"
+      "excludeFiles": "{app/web/src/**,app/web/public/**,app/web/node_modules/**,app/docs/**,app/tests/**,analyzer/tests/**,dataset/**,lab/**,capture/**,gen/**,tools/**,features/**,models/**,public/**,**/__pycache__/**,docker-compose.yml}"
     }
   },
-  "rewrites": [
-    {
-      "source": "/((?!api/).*)",
-      "destination": "/index.html"
-    }
-  ],
   "headers": [
     {
       "source": "/assets/(.*)",

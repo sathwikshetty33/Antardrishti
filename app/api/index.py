@@ -337,3 +337,9 @@ def replay_next(aid: str, s: Session = Depends(db.dep)):
         a.status = "replaying"
     s.commit()
     return summary(a)
+
+
+# the dashboard (app/web/dist, built by `npm run build`): low-priority routes after every api route,
+# index.html for client-side routes. vercel promotes it to the cdn (pyproject.toml,
+# tool.vercel.fastapi.static). the path is relative to the working directory, the repository root.
+app.frontend("/", directory="app/web/dist", fallback="index.html", check_dir=False)

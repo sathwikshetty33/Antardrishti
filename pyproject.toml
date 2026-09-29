@@ -18,3 +18,9 @@ dependencies = [
 
 [tool.vercel]
 entrypoint = "app.api.index:app"
+
+# the dashboard served by app.frontend() goes to the cdn (the gzip middleware would otherwise keep
+# it in the function) and is left out of the function bundle
+[tool.vercel.fastapi.static]
+cdn = true
+exclude = true

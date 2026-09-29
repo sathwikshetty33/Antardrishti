@@ -36,7 +36,7 @@ capture to the API in 5-second chunks.
 | api | FastAPI, pydantic (result contract `app/schema`, JSON Schema), SQLAlchemy 2 with NullPool, Alembic, psycopg 3 |
 | data | PostgreSQL: Neon on Vercel, Docker locally. Captures in Vercel Blob (browser client uploads) or a local folder |
 | dashboard | React 19, TypeScript, Vite, Tailwind CSS 4, shadcn/ui components on Radix, Apache ECharts, Framer Motion, lucide; reports printed to PDF in the browser |
-| hosting | Vercel Hobby: FastAPI preset, static output in `public/`, 300 s functions |
+| hosting | Vercel Hobby: FastAPI preset, the dashboard served by `app.frontend()` from the CDN, 300 s functions |
 
 ## Layout
 
