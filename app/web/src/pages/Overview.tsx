@@ -5,7 +5,8 @@ import { PageHeader } from '@/components/AppShell'
 import { BandBadge, ConfidenceBadge, SeverityBadge, StatusBadge } from '@/components/badges'
 import { RiskGauge } from '@/components/RiskGauge'
 import { StatTile } from '@/components/StatTile'
-import { CardSkeleton, EmptyState, ErrorState } from '@/components/states'
+import { BrandLogo } from '@/components/Brand'
+import { CardSkeleton, ErrorState } from '@/components/states'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, Td, Th, Tr } from '@/components/ui/table'
@@ -30,12 +31,15 @@ export function Overview() {
     return (
       <>
         <PageHeader title="Overview" description="Tunnels, risk and alerts across recent analyses." />
-        <Card>
-          <EmptyState icon={Waypoints} title="No analyses yet"
-            action={<div className="flex gap-2"><Button variant="primary" onClick={() => nav('/upload')}><UploadCloud /> Analyze a capture</Button>
-              <Button onClick={() => nav('/replay')}><PlayCircle /> Watch a demo replay</Button></div>}>
-            Upload an outer IPsec capture (pcap or pcapng), or load one of the three demo captures with one click.
-          </EmptyState>
+        <Card className="flex flex-col items-center px-6 py-12 text-center">
+          <BrandLogo className="w-56" />
+          <p className="mt-6 max-w-md text-sm text-text-2">
+            No analyses yet. Upload an outer IPsec capture (pcap or pcapng), or load one of the three demo captures with one click.
+          </p>
+          <div className="mt-5 flex flex-wrap justify-center gap-2">
+            <Button variant="primary" onClick={() => nav('/upload')}><UploadCloud /> Analyze a capture</Button>
+            <Button onClick={() => nav('/replay')}><PlayCircle /> Watch a demo replay</Button>
+          </div>
         </Card>
       </>
     )

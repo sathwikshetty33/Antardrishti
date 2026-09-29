@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Modal } from '@/components/ui/sheet'
 import { Tip } from '@/components/ui/tooltip'
+import { BrandMark } from '@/components/Brand'
 import { accessKey, api, setAccessKey } from '@/lib/api'
 import { currentTheme, setTheme, type Theme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
@@ -20,24 +21,14 @@ const nav = [
   { to: '/reports', label: 'Reports', icon: FileText },
 ]
 
-function Logo() {
-  return (
-    <svg viewBox="0 0 32 32" className="size-7 shrink-0" aria-hidden>
-      <rect width="32" height="32" rx="8" fill="var(--accent-soft)" />
-      <path d="M6 16c3-5.5 6.3-8 10-8s7 2.5 10 8c-3 5.5-6.3 8-10 8S9 21.5 6 16Z" fill="none" stroke="var(--accent)" strokeWidth="2" />
-      <circle cx="16" cy="16" r="3.4" fill="var(--accent)" />
-    </svg>
-  )
-}
-
 export function Sidebar() {
   return (
     <aside className="no-print sticky top-0 hidden h-screen w-[72px] shrink-0 flex-col border-r border-border bg-surface md:flex xl:w-[232px]">
       <div className="flex h-14 items-center gap-2.5 border-b border-border px-5">
-        <Logo />
+        <BrandMark />
         <div className="hidden leading-tight xl:block">
           <div className="text-sm font-semibold tracking-tight">Antardrishti</div>
-          <div className="text-[11px] text-muted">IPsec traffic intelligence</div>
+          <div className="text-[11px] text-muted">See inside the tunnel</div>
         </div>
       </div>
       <nav className="flex flex-1 flex-col gap-1 p-3" aria-label="Main">
@@ -126,7 +117,7 @@ function TopBar() {
   return (
     <header className="no-print sticky top-0 z-30 flex h-14 items-center justify-between gap-4 border-b border-border bg-bg/85 px-4 backdrop-blur md:px-6">
       <div className="flex items-center gap-3 text-xs text-text-2 md:hidden">
-        <Logo />
+        <BrandMark />
         <span className="text-sm font-semibold text-text">Antardrishti</span>
       </div>
       <div className="hidden text-xs text-muted md:block">IPsec VPN analysis · config inference · traffic classification · security assessment</div>

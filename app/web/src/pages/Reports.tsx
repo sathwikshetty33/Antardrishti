@@ -5,6 +5,7 @@ import { useEffect } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { PageHeader } from '@/components/AppShell'
 import { BandBadge, ConfidenceBadge, SeverityBadge, SourceBadge, StatusBadge, VerdictBadge } from '@/components/badges'
+import { BrandLogo } from '@/components/Brand'
 import { RiskGauge } from '@/components/RiskGauge'
 import { ShareBar } from '@/components/ShareBar'
 import { WindowTimeline } from '@/components/WindowTimeline'
@@ -72,14 +73,17 @@ function ReportFrame({ r, kind, children }: { r: Report; kind: string; children:
       <article className="mx-auto max-w-[900px] px-8 py-10 text-sm">
         <header className="flex items-start justify-between gap-6 border-b border-border pb-5">
           <div>
-            <p className="text-xs uppercase tracking-wider text-muted">Antardrishti · {kind} report</p>
+            <p className="text-xs uppercase tracking-wider text-muted">{kind} report</p>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight">{r.analysis.name}</h1>
             <p className="mt-1 text-xs text-text-2">
               Analysed {r.analysis.finished_at ? new Date(r.analysis.finished_at).toLocaleString('en-GB') : '-'} · {r.tunnels.length} tunnel{r.tunnels.length === 1 ? '' : 's'} ·
               model bundle {r.model.version} ({r.model.commit?.slice(0, 7)}) · contract {r.model.schema_version}
             </p>
           </div>
-          <div className="text-right text-xs text-muted num">{r.analysis.id.slice(0, 8)}</div>
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <BrandLogo variant="light" className="w-40" />
+            <span className="text-xs text-muted num">{r.analysis.id.slice(0, 8)}</span>
+          </div>
         </header>
         {children}
         <footer className="mt-10 border-t border-border pt-3 text-[11px] text-muted">

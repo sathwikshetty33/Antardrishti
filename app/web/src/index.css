@@ -14,9 +14,9 @@
   --text: #e7eaf0;
   --text-2: #a4acbb;
   --muted: #737c8e;
-  --accent: #2dd4bf;
+  --accent: #12a38f;          /* the logo teal */
   --accent-ink: #062a26;
-  --accent-soft: color-mix(in oklab, #2dd4bf 14%, transparent);
+  --accent-soft: color-mix(in oklab, #12a38f 16%, transparent);
   --critical: #ff6b6b;
   --high: #ff9f43;
   --medium: #f5c542;

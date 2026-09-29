@@ -152,7 +152,7 @@ Built into `public/` and served from the CDN.
 | text | `#e7eaf0` | `#0f1320` | primary text |
 | text-2 | `#a4acbb` | `#4a5263` | secondary text |
 | muted | `#737c8e` | `#6b7385` | captions (large text only in light) |
-| accent | `#2dd4bf` | `#0d6b64` | brand, focus ring, primary buttons |
+| accent | `#12a38f` (the logo teal) | `#0d6b64` | brand, focus ring, primary buttons |
 | critical | `#ff6b6b` | `#b42323` | severity |
 | high | `#ff9f43` | `#9a4a07` | severity |
 | medium | `#f5c542` | `#735b00` | severity |
@@ -161,6 +161,14 @@ Built into `public/` and served from the CDN.
 
   Severity chips are the severity colour on a 14% tint of itself, so the text keeps AA
   contrast in both themes; severity never relies on colour alone (icon and label).
+- **Brand** (the owner's logos, 2026-09-29): originals in `app/web/brand` (`logo.png` light
+  lockup, `logo-dark.png` / `logo-dark.svg` dark lockup, `mark.png`, `favicon-512.png`);
+  `app/web/scripts/brand.py` derives the web assets in `app/web/public` (favicons, touch and PWA
+  icons, the UI mark, the light lockup, the dark lockup with a transparent background, a
+  1200 x 630 link preview). Brand colours: navy `#1B2A6B`, teal `#12A38F`, gold `#F4B400` (the
+  lock, kept out of the UI palette so it never reads as a severity), navy-black `#0F172A`,
+  light teal `#5EEAD4`; tagline "See inside the tunnel". The mark sits in the shell, the lockup
+  on the first-run screen and on both reports.
 - **App colours** (charts, fixed order, never cycled; the validated reference palette):
   voip `#3987e5`, video `#d95926`, web `#199e70`, email `#c98500`, icmp `#d55181`, bulk
   `#008300`, chat `#9085e9` in dark (light: `#2a78d6`, `#eb6834`, `#1baf7a`, `#eda100`,
