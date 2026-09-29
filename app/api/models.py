@@ -142,3 +142,33 @@ class replay_chunk(base):
     t_end: Mapped[float] = mapped_column(Float)
     packets: Mapped[int] = mapped_column(Integer)
     data: Mapped[bytes] = mapped_column(LargeBinary)
+
+
+class live_session(base):
+    """a live capture session: one analyses row (source="live") plus this sensor-facing state.
+    no workspaces or read access control (app/CLAUDE.md live-mode brief): every session is
+    readable by anyone, only feeding it needs the sensor key."""
+    __tablename__ = "live_sessions"
+    analysis_id: Mapped[str] = mapped_column(ForeignKey("analyses.id", ondelete="CASCADE"), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), default="")
+    key_hash: Mapped[str] = mapped_column(String(64))                    # sha256 of the sensor key; never the key
+    status: Mapped[str] = mapped_column(String(16), default="waiting")   # waiting live stopped expired
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    last_chunk_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    chunks: Mapped[int] = mapped_column(Integer, default=0)
+    total_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    last_seq: Mapped[int] = mapped_column(Integer, default=-1)
+    creator_ip: Mapped[str] = mapped_column(String(64), default="")
+    esp_header: Mapped[bytes | None] = mapped_column(LargeBinary)        # the first chunk's 24-byte pcap header
+    ike_header: Mapped[bytes | None] = mapped_column(LargeBinary)
+
+
+class live_chunk(base):
+    __tablename__ = "live_chunks"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    analysis_id: Mapped[str] = mapped_column(ForeignKey("analyses.id", ondelete="CASCADE"), index=True)
+    seq: Mapped[int] = mapped_column(Integer)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    esp_data: Mapped[bytes] = mapped_column(LargeBinary)                 # zstd-compressed pcap records (no header)
+    ike_data: Mapped[bytes | None] = mapped_column(LargeBinary)
+    packets: Mapped[int] = mapped_column(Integer, default=0)

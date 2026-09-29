@@ -50,3 +50,10 @@ tmp_dir = Path(env("TMP_DIR", "/tmp"))
 on_vercel = bool(env("VERCEL"))
 demo_dir = api_dir / "demo"
 replay_chunk_s = 5.0
+
+# live capture sessions (protects the free tier: app/CLAUDE.md live-mode brief item 2)
+live_max_chunk_mb = float(env("LIVE_MAX_CHUNK_MB", "3"))               # well under vercel's 4.5 mb body limit
+live_min_chunk_interval_s = float(env("LIVE_MIN_CHUNK_INTERVAL_S", "1"))
+live_idle_timeout_s = float(env("LIVE_IDLE_TIMEOUT_S", str(20 * 60)))   # auto-stop without chunks
+live_max_duration_s = float(env("LIVE_MAX_DURATION_S", str(2 * 60 * 60)))  # auto-stop overall
+live_max_sessions_per_ip = int(env("LIVE_MAX_SESSIONS_PER_IP", "3"))
