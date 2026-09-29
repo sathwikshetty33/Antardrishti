@@ -1,18 +1,20 @@
 """antardrishti api (fastapi). on vercel this module is the python function (pyproject.toml
 tool.vercel.entrypoint); locally: uvicorn app.api.index:app --reload --port 8000"""
+import gzip
 import re
 import shutil
 import time
 import uuid
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api import db, pipeline, replay, settings, storage
+from app.api import db, live, pipeline, replay, settings, storage
 from app.api import models as m
 from app.api.rules import table as rules_table
 from app.schema import v1
@@ -21,6 +23,7 @@ app = FastAPI(title="Antardrishti API", version="1.0", docs_url="/api/docs", ope
 app.add_middleware(GZipMiddleware, minimum_size=2048)
 capture_ext = re.compile(r"\.(pcap|pcapng|cap)(\.zst)?$", re.I)
 sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+agent_script = Path(__file__).resolve().parent / "agent" / "antardrishti-agent.py"
 
 
 def guard(x_access_key: str | None = Header(None)):
@@ -276,10 +279,15 @@ def report(aid: str, s: Session = Depends(db.dep)):
 
 
 @app.get("/api/overview")
-def overview(s: Session = Depends(db.dep)):
-    """recent analyses, the latest finished analysis' tunnels and risk, and critical alerts"""
-    recent = s.query(m.analysis).order_by(m.analysis.created_at.desc()).limit(8).all()
-    done = s.query(m.analysis).filter(m.analysis.status == "done").order_by(m.analysis.created_at.desc()).limit(20).all()
+def overview(session: str | None = None, s: Session = Depends(db.dep)):
+    """recent analyses, the latest finished analyses' tunnels and risk, and critical alerts.
+    ?session={id} scopes all of this to one live session or uploaded analysis instead."""
+    if session:
+        recent = [a for a in [s.get(m.analysis, session)] if a is not None]
+        done = [a for a in recent if a.status == "done"]
+    else:
+        recent = s.query(m.analysis).order_by(m.analysis.created_at.desc()).limit(8).all()
+        done = s.query(m.analysis).filter(m.analysis.status == "done").order_by(m.analysis.created_at.desc()).limit(20).all()
     inventory, alerts = [], []
     for a in done:
         risks = risks_of(s, a.id)
@@ -345,6 +353,119 @@ def replay_next(aid: str, s: Session = Depends(db.dep)):
         a.status = "replaying"
     s.commit()
     return summary(a)
+
+
+# ---------------------------------------------------------------- live sessions
+
+def client_ip(request: Request):
+    fwd = request.headers.get("x-forwarded-for", "")
+    return fwd.split(",")[0].strip() or (request.client.host if request.client else "unknown")
+
+
+def get_live(s, sid):
+    sess = s.get(m.live_session, sid)
+    if sess is None:
+        raise HTTPException(404, "no such live session")
+    return sess
+
+
+def live_summary(s, sess):
+    a = s.get(m.analysis, sess.analysis_id)
+    return {"id": sess.analysis_id, "name": sess.name, "status": live.refresh_status(s, sess),
+            "chunks": sess.chunks, "bytes": sess.total_bytes, "last_seq": sess.last_seq,
+            "created_at": sess.created_at.isoformat(),
+            "last_chunk_at": sess.last_chunk_at.isoformat() if sess.last_chunk_at else None,
+            "risk": a.risk if a else None, "risk_band": a.risk_band if a else None,
+            "tunnel_count": len((a.result or {}).get("tunnels", [])) if a else 0}
+
+
+def gunzip(b):
+    return gzip.decompress(b) if b[:2] == b"\x1f\x8b" else b
+
+
+class live_start(BaseModel):
+    name: str | None = None
+
+
+@app.post("/api/live", dependencies=[Depends(guard)])
+def live_create(req: live_start, request: Request, s: Session = Depends(db.dep)):
+    ip = client_ip(request)
+    if live.active_count(s, ip) >= settings.live_max_sessions_per_ip:
+        raise HTTPException(429, f"at most {settings.live_max_sessions_per_ip} active live sessions per client")
+    aid = str(uuid.uuid4())
+    key = live.new_key()
+    s.add(m.analysis(id=aid, source="live", name=(req.name or "Live session")[:200], status="running",
+                     stage="waiting", progress=0.0))
+    s.add(m.live_session(analysis_id=aid, name=req.name or "", key_hash=live.key_hash(key), creator_ip=ip))
+    s.commit()
+    return {**live_summary(s, get_live(s, aid)), "key": key}
+
+
+@app.get("/api/live")
+def live_list(s: Session = Depends(db.dep)):
+    rows = s.query(m.live_session).order_by(m.live_session.created_at.desc()).all()
+    return [live_summary(s, r) for r in rows]
+
+
+@app.get("/api/live/{sid}")
+def live_get(sid: str, s: Session = Depends(db.dep)):
+    return live_summary(s, get_live(s, sid))
+
+
+@app.get("/api/live/{sid}/alerts")
+def live_alerts(sid: str, s: Session = Depends(db.dep)):
+    get_live(s, sid)
+    return [f for f in findings_of(s, sid) if f["verdict"] == "fail" and f["severity"] in ("critical", "high")]
+
+
+@app.post("/api/live/{sid}/chunks")
+async def live_chunks(sid: str, seq: int = Form(...), esp: UploadFile = File(...),
+                      ike: UploadFile | None = File(None), x_sensor_key: str | None = Header(None),
+                      s: Session = Depends(db.dep)):
+    sess = get_live(s, sid)
+    if not live.check_key(sess, x_sensor_key):
+        raise HTTPException(403, "missing or wrong sensor key (x-sensor-key)")
+    eff = live.refresh_status(s, sess)
+    if eff in ("stopped", "expired"):
+        raise HTTPException(410, f"this session is {eff}")
+    if seq != sess.last_seq + 1:
+        raise HTTPException(409, f"out of order: expected seq {sess.last_seq + 1}")
+    if sess.last_chunk_at and (m.now() - sess.last_chunk_at).total_seconds() < settings.live_min_chunk_interval_s:
+        raise HTTPException(429, "at most 1 chunk per second per session")
+    esp_wire = await esp.read()
+    ike_wire = await ike.read() if ike is not None else None
+    total = len(esp_wire) + (len(ike_wire) if ike_wire else 0)
+    if total > settings.live_max_chunk_mb * 2 ** 20:
+        raise HTTPException(413, f"the chunk is over the {settings.live_max_chunk_mb:.0f} MB limit")
+    try:
+        n = live.store_chunk(s, sess, seq, gunzip(esp_wire), gunzip(ike_wire) if ike_wire else None)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    a = s.get(m.analysis, sid)
+    esp_path, ike_path = live.rebuild(s, sess)
+    try:
+        inputs = [(esp_path, "live-esp.pcap")] + ([(ike_path, "live-ike.pcap")] if ike_path else [])
+        pipeline.run(s, a, inputs)
+    finally:
+        esp_path.unlink(missing_ok=True)
+        if ike_path:
+            ike_path.unlink(missing_ok=True)
+    return {**live_summary(s, sess), "packets_in_chunk": n, "analysis": summary(a)}
+
+
+@app.post("/api/live/{sid}/stop")
+def live_stop(sid: str, x_sensor_key: str | None = Header(None), s: Session = Depends(db.dep)):
+    sess = get_live(s, sid)
+    if not live.check_key(sess, x_sensor_key):
+        raise HTTPException(403, "missing or wrong sensor key (x-sensor-key)")
+    sess.status = "stopped"
+    s.commit()
+    return live_summary(s, sess)
+
+
+@app.get("/agent/antardrishti-agent.py")
+def get_agent_script():
+    return PlainTextResponse(agent_script.read_text(), media_type="text/x-python")
 
 
 # the dashboard (app/web/dist, built by `npm run build`): low-priority routes after every api route,
