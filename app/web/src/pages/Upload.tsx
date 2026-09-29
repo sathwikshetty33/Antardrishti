@@ -199,7 +199,7 @@ export function Upload() {
                   <button key={d.name} type="button" disabled={busy}
                     onClick={() => { setBusy(true); setError(null); run({ demo: d.name }) }}
                     className="flex w-full items-start gap-3 rounded-lg border border-border p-3 text-left transition-colors hover:border-accent hover:bg-surface-2 disabled:opacity-50 cursor-pointer">
-                    <Play className="mt-0.5 size-4 text-accent" aria-hidden />
+                    <Play className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
                     <div className="min-w-0">
                       <p className="text-sm font-medium">{d.title}</p>
                       <p className="mt-0.5 line-clamp-2 text-xs text-text-2">{d.description}</p>

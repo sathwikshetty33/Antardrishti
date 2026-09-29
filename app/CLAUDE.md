@@ -152,12 +152,12 @@ Built into `public/` and served from the CDN.
 | text | `#e7eaf0` | `#0f1320` | primary text |
 | text-2 | `#a4acbb` | `#4a5263` | secondary text |
 | muted | `#737c8e` | `#6b7385` | captions (large text only in light) |
-| accent | `#2dd4bf` | `#0f766e` | brand, focus ring, primary buttons |
-| critical | `#ff6b6b` | `#c42b2b` | severity |
-| high | `#ff9f43` | `#b45309` | severity |
-| medium | `#f5c542` | `#8a6d00` | severity |
-| low | `#60a5fa` | `#1d5fd1` | severity |
-| info / pass | `#94a3b8` / `#34d399` | `#5b6474` / `#11804f` | severity, verdicts |
+| accent | `#2dd4bf` | `#0d6b64` | brand, focus ring, primary buttons |
+| critical | `#ff6b6b` | `#b42323` | severity |
+| high | `#ff9f43` | `#9a4a07` | severity |
+| medium | `#f5c542` | `#735b00` | severity |
+| low | `#60a5fa` | `#1a57c2` | severity |
+| info / pass | `#94a3b8` / `#34d399` | `#5b6474` / `#0e6e44` | severity, verdicts |
 
   Severity chips are the severity colour on a 14% tint of itself, so the text keeps AA
   contrast in both themes; severity never relies on colour alone (icon and label).
@@ -251,3 +251,11 @@ compose Postgres, uvicorn, Vite).
   (local run), README "Run the platform" and "Tech stack". Function bundle about 143 MB
   (127 MB of dependencies). Largest capture: `MAX_PCAP_MB` = 300 (13.4 s, 686 MB under a 2 GB
   address-space cap; about 40 s at an assumed 3x slower vCPU).
+- **Step 7 done (2026-09-29).** Tests: 144 Python tests pass (analyzer 46 incl. the numpy
+  evaluator against lightgbm; contract 19; rules 60, one case per check plus wording, "not
+  determinable", scores and threats; API 10 on the 3 demo captures, upload -> analysis ->
+  findings, replay, access key, limits, blob token; platform 8: no heavy imports or binaries at
+  runtime, bundle selection and tamper check, WCAG AA contrast of every text and severity
+  token in both themes, which moved 6 light-theme tokens; timing 1: 300 MB in 13.4 s, 686 MB
+  under a 2 GB address-space cap). Frontend: 3 unit tests (rounding, error bars, "likely"),
+  `tsc -b`, oxlint and the build clean. Screenshots retaken.
