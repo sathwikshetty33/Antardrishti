@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "python3 -m app.api.verify_bundle && cd app/web && npm ci --no-audit --no-fund && npm run build",
+  "buildCommand": "python3 -m app.api.verify_bundle && sh app/migrate.sh && cd app/web && npm ci --no-audit --no-fund && npm run build",
   "functions": {
     "app/api/index.py": {
       "maxDuration": 300,

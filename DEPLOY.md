@@ -53,8 +53,10 @@ In **Settings → Environment Variables**, for Production and Preview:
 
 ## 5. Create the tables (migrations)
 
-Migrations never run at function start. Run them once from your machine, and again after
-any schema change:
+Migrations never run at function start. Every Vercel build runs them (`app/migrate.sh`, from the
+build command) with `DATABASE_URL_UNPOOLED` once Neon is connected, and skips them when no
+database is configured, so a redeploy after connecting Neon creates the tables. To run them
+by hand from your machine instead:
 
 ```bash
 cd SIH
