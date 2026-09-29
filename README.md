@@ -429,7 +429,7 @@ The same code runs self-hosted, with Postgres in Docker and a local folder for c
 ### Analyse a capture from the command line
 
 ```bash
-git clone https://github.com/sathwikshetty33/SIH.git && cd SIH
+git clone https://github.com/sathwikshetty33/Antardrishti.git && cd Antardrishti
 uv venv --python 3.12 .venv && . .venv/bin/activate      # https://docs.astral.sh/uv/
 uv pip install -r pyproject.toml
 python -m analyzer.cli analyze app/api/demo/whatsapp.pcap.zst --out result.json
@@ -468,7 +468,7 @@ This needs collaborator access to the draft data releases.
 ```bash
 uv pip install -r analyzer/requirements.txt           # lightgbm, pandas, pyarrow, scikit-learn, ...
 for r in p0-data p0s-data p1-data p1-whatsapp p0-labels p0s-labels p1-labels p1-whatsapp-labels; do
-  gh release download $r -R sathwikshetty33/SIH -D ~/antar-data/dl/$r
+  gh release download $r -R sathwikshetty33/Antardrishti -D ~/antar-data/dl/$r
   (cd ~/antar-data/dl/$r && sha256sum -c *.sha256)   # verify before extracting
 done
 mkdir -p ~/antar-data/labels && cd ~/antar-data/labels
@@ -619,7 +619,7 @@ git add lab/images.lock && git commit -m "lab: Pin lab images."
 **Giving a teammate read access** (once per package, for each of the six packages on
 github.com/sathwikshetty33?tab=packages):
 
-1. Package settings, *Manage Codespaces access*: add `sathwikshetty33/SIH` with read access.
+1. Package settings, *Manage Codespaces access*: add `sathwikshetty33/Antardrishti` with read access.
    Codespaces created from this repository can then pull with their own built-in token.
 2. Package settings, *Manage access*: invite the teammate with the *Read* role. This is needed
    to pull from anywhere else, and is the fallback if step 1 is not enough.

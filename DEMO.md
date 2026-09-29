@@ -7,7 +7,7 @@ Redis or workers are needed.
 ## Once
 
 ```bash
-git clone https://github.com/sathwikshetty33/SIH.git && cd SIH
+git clone https://github.com/sathwikshetty33/Antardrishti.git && cd Antardrishti
 uv venv --python 3.12 .venv && . .venv/bin/activate   # uv: https://docs.astral.sh/uv/
 uv pip install -r pyproject.toml -r app/requirements-dev.txt
 cp .env.example .env                                 # local defaults: STORAGE=local, docker postgres

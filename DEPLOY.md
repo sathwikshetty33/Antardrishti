@@ -15,7 +15,7 @@ repository, an issue or a chat.
 
 ## 1. Create the project
 
-1. On vercel.com, open **Add New… → Project** and import `sathwikshetty33/SIH`.
+1. On vercel.com, open **Add New… → Project** and import `sathwikshetty33/Antardrishti`.
 2. **Root Directory:** leave it at the repository root (`./`).
 3. **Framework Preset:** Vercel should detect **FastAPI** from `pyproject.toml`. If it doesn't,
    pick FastAPI. Leave the Build, Output and Install settings on their defaults. `vercel.json`
@@ -67,7 +67,7 @@ database is configured, so a redeploy after connecting Neon creates the tables. 
 by hand from your machine instead:
 
 ```bash
-cd SIH
+cd Antardrishti
 uv venv --python 3.12 .venv && . .venv/bin/activate
 uv pip install -r pyproject.toml -r app/requirements-dev.txt
 # paste the direct connection string at the prompt instead of into a file:
