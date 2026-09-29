@@ -9,11 +9,14 @@ import { CardSkeleton, EmptyState, ErrorState } from '@/components/states'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Modal } from '@/components/ui/sheet'
 import { Table, Td, Th, Tr } from '@/components/ui/table'
 import { ApiError, api, type LiveSession } from '@/lib/api'
+import { demoLabel, demoRun, isDemoSession, startDemoSensor, stopDemoSensor } from '@/lib/demoSensor'
 import { num, when } from '@/lib/format'
 import { setSelectedRun } from '@/lib/run'
+import { cn } from '@/lib/utils'
 import { keepSensor, keptSensor, stopSession, useSensors } from '@/lib/sensors'
 
 type Mode = 'demo' | 'agent'
@@ -56,11 +59,14 @@ function SessionRow({ s }: { s: LiveSession }) {
   const qc = useQueryClient()
   const [busy, setBusy] = useState(false)
   const mine = keptSensor(s.id)
+  const run = demoRun(s.id)
+  const demo = isDemoSession(s.id, s.name)
   const active = s.status === 'waiting' || s.status === 'live'
   const stop = async (e: MouseEvent) => {
     e.stopPropagation()
     setBusy(true)
     try {
+      stopDemoSensor(s.id)
       await stopSession(s.id)
       await qc.invalidateQueries({ queryKey: ['live-sessions'] })
     } catch (err) {
@@ -73,14 +79,24 @@ function SessionRow({ s }: { s: LiveSession }) {
     <Tr className="cursor-pointer" onClick={() => nav(`/analyses/${s.id}`)}>
       <Td className="max-w-[360px]">
         <div className="truncate">{s.name || 'Live session'}</div>
-        <div className="text-xs text-muted">{mine ? 'created in this browser' : 'sensor'} · {when(s.created_at)}</div>
+        <div className="text-xs text-muted">
+          {demo ? demoLabel : mine ? 'your sensor' : 'sensor'} · {when(s.created_at)}
+          {run?.running ? <span className="num"> · slice {run.seq} of {run.steps ?? '…'}</span> : null}
+        </div>
       </Td>
       <Td><LiveBadge status={s.status} /></Td>
       <Td className="num text-right">{num(s.chunks)}</Td>
       <Td className="text-xs text-text-2">{when(s.last_chunk_at ?? s.created_at)}</Td>
       <Td>{s.risk != null ? <BandBadge band={s.risk_band} score={s.risk} /> : <span className="text-xs text-muted">-</span>}</Td>
       <Td className="text-right">
-        {mine && active ? <Button size="sm" variant="outline" disabled={busy} onClick={stop}><Square /> Stop</Button> : null}
+        <div className="flex justify-end gap-2">
+          {mine?.kind === 'demo' && active && !run?.running ? (
+            <Button size="sm" onClick={(e) => { e.stopPropagation(); startDemoSensor(s.id, mine.demo ?? 'mixture', s.last_seq + 1) }}>
+              <Play /> Resume
+            </Button>
+          ) : null}
+          {mine && active ? <Button size="sm" variant="outline" disabled={busy} onClick={stop}><Square /> Stop</Button> : null}
+        </div>
       </Td>
     </Tr>
   )
@@ -89,6 +105,8 @@ function SessionRow({ s }: { s: LiveSession }) {
 // both buttons ask for an optional session name, then create the session and keep its key
 function NewSession({ mode, onClose }: { mode: Mode | null; onClose: () => void }) {
   const qc = useQueryClient()
+  const demos = useQuery({ queryKey: ['demos'], queryFn: api.demos, enabled: mode === 'demo' })
+  const [demo, setDemo] = useState('mixture')
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -103,9 +121,13 @@ function NewSession({ mode, onClose }: { mode: Mode | null; onClose: () => void 
     setBusy(true)
     setError(null)
     try {
-      const s = await api.liveCreate(name.trim() || null)
-      keepSensor(s.id, { key: s.key, kind: mode, created: Date.now() })
+      // a demo session says so in its name, so everyone who sees it knows it is recorded traffic
+      const title = demos.data?.find((d) => d.name === demo)?.title ?? demo
+      const label = mode === 'demo' ? `${demoLabel}: ${name.trim() || title}` : name.trim() || null
+      const s = await api.liveCreate(label)
+      keepSensor(s.id, { key: s.key, kind: mode, demo: mode === 'demo' ? demo : undefined, created: Date.now() })
       setSelectedRun(s.id)
+      if (mode === 'demo') startDemoSensor(s.id, demo, 0)
       await qc.invalidateQueries({ queryKey: ['live-sessions'] })
       close()
     } catch (err) {
@@ -124,6 +146,22 @@ function NewSession({ mode, onClose }: { mode: Mode | null; onClose: () => void 
           <Input value={name} maxLength={120} onChange={(e) => setName(e.target.value)} autoFocus
             placeholder={mode === 'demo' ? 'for example: lab walkthrough' : 'for example: branch office gateway'} />
         </label>
+        {mode === 'demo' ? (
+          <fieldset className="space-y-2">
+            <legend className="mb-1.5 text-xs text-text-2">Recorded capture to feed, 5 seconds every 5 seconds</legend>
+            {demos.isLoading ? <Skeleton className="h-14" /> : demos.data?.map((d) => (
+              <button key={d.name} type="button" onClick={() => setDemo(d.name)} aria-pressed={demo === d.name}
+                className={cn('w-full cursor-pointer rounded-lg border p-3 text-left transition-colors',
+                  demo === d.name ? 'border-accent bg-accent-soft' : 'border-border hover:bg-surface-2')}>
+                <p className="text-sm font-medium">{d.title}</p>
+                <p className="num mt-0.5 text-[11px] text-muted">{d.steps} slices of 5 s · {num(d.packets)} packets</p>
+              </button>
+            ))}
+            <p className="text-[11px] text-muted">
+              Labelled "{demoLabel}": the slices go through the same path as a real sensor's chunks, with the capture's own timestamps.
+            </p>
+          </fieldset>
+        ) : null}
         {error ? <p role="alert" className="text-xs" style={{ color: 'var(--critical)' }}>{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={close}>Cancel</Button>
